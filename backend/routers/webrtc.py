@@ -55,6 +55,10 @@ async def offer(offer_data: Offer):
         print(f"STEP Y (Async): Connection state changed: {pc.connectionState}")
         logger.info(f"Connection state: {pc.connectionState}")
         if pc.connectionState == "failed" or pc.connectionState == "closed":
+            print(f"STEP Cleanup: Connection {pc.connectionState}, stopping {len(pc.audio_consumers)} consumers.")
+            for consumer in pc.audio_consumers:
+                consumer.stop()
+                consumers.discard(consumer)
             await pc.close()
 
     # Handle the offer

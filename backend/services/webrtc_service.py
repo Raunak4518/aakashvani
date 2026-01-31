@@ -1,115 +1,111 @@
 import asyncio
-import json
 import time
-import random
+import uuid
 import logging
 from av import AudioFrame
-from aiortc import MediaStreamTrack
-from models import DetectionResult
-from services.state import db
+
+# Modules
+from modules.audio.manager import AudioStreamManager
+from config import StreamingConfig
+import uuid
 
 logger = logging.getLogger("uvicorn")
 
 class AudioConsumer:
     """
-    Consumers an audio track, performs (simulated) inference,
-    and sends results back via the DataChannel.
+    Consumers an audio track, delegating processing to AudioStreamManager.
     """
     def __init__(self, track, data_channel):
+        self.id = str(uuid.uuid4())[:8]
         self.track = track
-        self.data_channel = data_channel
-        self.processing_task = None
         self.running = False
+        self.processing_task = None
+        self.stream_manager = AudioStreamManager(StreamingConfig())
+        self.response_handler = None
+        self.data_channel = data_channel
+        
+        # We need a way to send data. Manager has a response_handler but it needs the data channel.
+        # But Manager's handler in my impl currently doesn't hold the channel (I passed None).
+        # Let's handle sending here or inject channel into manager.
+        # Updated approach: Consumer handles sending, manager returns payload.
+        
+    def set_data_channel(self, data_channel):
+        print(f"STEP 5.1: Associated Data Channel with Consumer [{self.id}]")
+        self.data_channel = data_channel
         
     def start(self):
-        print("STEP 4.1: Starting Audio Consumer Task")
+        print(f"STEP 4.1: Starting Audio Consumer Task [{self.id}]")
         self.running = True
         self.processing_task = asyncio.create_task(self._consume())
 
     def stop(self):
-        print("STEP X: Stopping Audio Consumer Task")
+        print(f"STEP X: Stopping Audio Consumer Task [{self.id}]")
         self.running = False
         if self.processing_task:
             self.processing_task.cancel()
 
-    def set_data_channel(self, data_channel):
-        print("STEP 5.1: Associated Data Channel with Consumer")
-        self.data_channel = data_channel
-
     async def _consume(self):
-        logger.info("Started WebRTC Audio Consumer")
+        logger.info(f"Started WebRTC Audio Consumer [{self.id}]")
         frame_count = 0
         
         try:
             while self.running:
-                # 1. Receive Raw Audio Frame
                 try:
-                    # This returns an av.AudioFrame
                     frame = await self.track.recv()
                     frame_count += 1
                 except Exception as e:
-                    # Track might be closed
-                    print(f"STEP ERROR: Error receiving frame: {e}")
-                    logger.warning(f"Error receiving frame: {e}")
+                    print(f"STEP ERROR [{self.id}]: Track ended/error: {e}")
                     break
                 
-                # 2. Process every N frames to simulate real-time windowing (e.g. every 10 frames approx 200ms)
-                if frame_count % 50 == 0: # Log every 50 frames to avoid spam but show activity
-                     print(f"STEP 6 Loop: Processing Audio Batch {frame_count}...")
-                
-                if frame_count % 10 == 0:
-                    await self._process_window(frame)
+                # Process via Manager
+                try:
+                    # Preprocess raw data to prevalidator needed? Manager handles it.
+                    # Note: process_frame(frame) allows manager to validate frame object.
+                    # We pass numpy data + object or just object?
+                    # My Manager.process_frame signature: (frame: np.ndarray, frame_obj=None)
+                    # Let's perform the basic conversion here to ensure we pass what it expects.
+                    
+                    data = frame.to_ndarray()
+                    
+                    # Call manager
+                    response = await self.stream_manager.process_frame(data, frame_obj=frame)
+                    
+                    if response:
+                         # Send Result
+                        if self.data_channel and self.data_channel.readyState == "open":
+                            import json
+                            # Wrap in detection_result specific format expected by frontend
+                            # The response is dict with timestamp, score, etc.
+                            # Frontend expects: type: "detection_result", data: { ... }
+                            
+                            payload = {
+                                "type": "detection_result",
+                                "data": {
+                                    "id": f"DET-{int(response['timestamp']*1000)}",
+                                    "timestamp": response['timestamp'] * 1000,
+                                    "status": "deepfake" if response['is_spoof'] else "authentic",
+                                    "confidence": response['confidence'],
+                                    "duration": 0.0, # N/A
+                                    "method": "Streaming-Transformer",
+                                    "is_new": True
+                                }
+                            }
+                            self.data_channel.send(json.dumps(payload))
+                            
+                            if response.get('alert'):
+                                self.data_channel.send(json.dumps({"type": "alert", "data": response['alert']}))
+
+                except Exception as e:
+                    logger.error(f"Processing Error [{self.id}]: {e}")
+                    pass
                     
         except asyncio.CancelledError:
-            logger.info("Audio Consumer Cancelled")
+            logger.info(f"Audio Consumer [{self.id}] Cancelled")
         except Exception as e:
-            logger.error(f"Error in Audio Consumer: {e}")
+            logger.error(f"Error in Audio Consumer [{self.id}]: {e}")
         finally:
-            print("STEP X: Consumer loop exited")
-            logger.info("Stopped WebRTC Audio Consumer")
+            print(f"STEP X: Consumer loop [{self.id}] exited")
+            logger.info(f"Stopped WebRTC Audio Consumer [{self.id}]")
 
-    async def _process_window(self, frame):
-        # Placeholder for real inference
-        # frame.to_ndarray() would get us the numpy array
-        
-        # Simulate latency
-        await asyncio.sleep(0.05) 
-        
-        # Mock Result
-        is_deepfake_prob = random.random()
-        is_deepfake = is_deepfake_prob < 0.2 # 20% mock chance
-        confidence = (random.uniform(80, 99) if is_deepfake else random.uniform(85, 99))
-        
-        result = DetectionResult(
-            id=f"W-DET-{int(time.time()*1000)}",
-            timestamp=time.time() * 1000,
-            status='deepfake' if is_deepfake else 'authentic',
-            confidence=confidence,
-            duration=0.2,
-            method="WebRTC-Live",
-            is_new=True
-        )
-        
-        # Log to DB
-        if db.current_session and db.current_session.status == 'recording':
-            db.add_detection(result)
-            
-        # Send via Data Channel
-        if self.data_channel and self.data_channel.readyState == "open":
-            try:
-                # print(f"STEP 7: Sending Result via DataChannel: {result.status} {result.confidence:.1f}%")
-                msg = json.dumps({
-                    "type": "detection_result",
-                    "data": result.dict()
-                })
-                self.data_channel.send(msg)
-            except Exception as e:
-                print(f"STEP ERROR: Failed to send DataChannel message: {e}")
-                logger.error(f"Failed to send DataChannel message: {e}")
-        else:
-             print("STEP WARNING: Cannot send result, Data Channel NOT open")
-             # logger.debug("Data channel not open yet")
-             pass
-
-# Global manager to keep track of connections if needed
+# Global manager to keep track of connections
 consumers = set()

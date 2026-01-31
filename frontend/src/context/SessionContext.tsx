@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect } from 'react';
+import type { ReactNode } from 'react';
 
 export type SessionStatus = 'idle' | 'recording' | 'paused';
 
@@ -15,18 +16,22 @@ interface SessionContextType {
 
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
 
+import { useWebRTC } from '../hooks/useWebRTC';
+
 export const SessionProvider = ({ children }: { children: ReactNode }) => {
-    const [status, setStatus] = useState<SessionStatus>('recording'); // Default to recording for demo
-    const [startTime, setStartTime] = useState<number | null>(Date.now());
+    const [status, setStatus] = useState<SessionStatus>('idle');
+    const [startTime, setStartTime] = useState<number | null>(null);
     const [duration, setDuration] = useState(0);
     const [sessionId] = useState(`SES-${new Date().getFullYear()}-${Math.random().toString(36).substr(2, 4).toUpperCase()}`);
 
+    // WebRTC Hook
+    const { startConnection, stopConnection } = useWebRTC();
+
     useEffect(() => {
-        let interval: NodeJS.Timeout;
+        let interval: ReturnType<typeof setInterval>;
 
         if (status === 'recording' && startTime) {
             // Update duration every second based on elapsed time
-            // In a real app, this might accumulate segments. For now, simple diff.
             interval = setInterval(() => {
                 setDuration(Math.floor((Date.now() - startTime) / 1000));
             }, 1000);
@@ -35,17 +40,26 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
         return () => clearInterval(interval);
     }, [status, startTime]);
 
-    const startSession = () => {
-        if (status === 'idle') {
+    const startSession = async () => {
+        if (status === 'idle' || status === 'paused') {
             setStartTime(Date.now());
             setDuration(0);
+
+            // Start WebRTC Connection
+            try {
+                await startConnection();
+                setStatus('recording');
+            } catch (err) {
+                console.error("Failed to start WebRTC session", err);
+                // Optionally handle error state here
+            }
         }
-        setStatus('recording');
     };
 
     const pauseSession = () => setStatus('paused');
 
     const stopSession = () => {
+        stopConnection(); // Stop WebRTC
         setStatus('idle');
         setStartTime(null);
         setDuration(0);
