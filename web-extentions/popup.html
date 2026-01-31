@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Audio Stream Control</title>
+  <style>
+    body {
+      width: 350px;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      margin: 0;
+    }
+    
+    h2 {
+      margin-top: 0;
+      font-size: 18px;
+      color: #333;
+    }
+    
+    .section {
+      margin-bottom: 20px;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      color: #555;
+      font-size: 14px;
+    }
+    
+    input, select {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      box-sizing: border-box;
+      font-size: 14px;
+    }
+    
+    button {
+      width: 100%;
+      padding: 12px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      margin-top: 10px;
+    }
+    
+    button:hover {
+      background-color: #45a049;
+    }
+    
+    button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    
+    .stop-btn {
+      background-color: #f44336;
+    }
+    
+    .stop-btn:hover {
+      background-color: #da190b;
+    }
+    
+    .status {
+      padding: 10px;
+      border-radius: 4px;
+      margin-top: 15px;
+      font-size: 13px;
+      text-align: center;
+    }
+    
+    .status.connected {
+      background-color: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    
+    .status.disconnected {
+      background-color: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    
+    .status.connecting {
+      background-color: #fff3cd;
+      color: #856404;
+      border: 1px solid #ffeeba;
+    }
+    
+    .info {
+      font-size: 12px;
+      color: #666;
+      margin-top: 15px;
+      padding: 10px;
+      background-color: #f8f9fa;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h2>🎤 Audio Stream Control</h2>
+  
+  <div class="section">
+    <label for="backendUrl">Backend WebRTC Server URL:</label>
+    <input type="text" id="backendUrl" placeholder="wss://your-server.com/signaling" />
+  </div>
+  
+  <div class="section">
+    <label for="audioSource">Audio Source:</label>
+    <select id="audioSource">
+      <option value="tab">Current Tab Audio</option>
+      <option value="microphone">Microphone</option>
+    </select>
+  </div>
+  
+  <button id="startBtn">Start Streaming</button>
+  <button id="stopBtn" class="stop-btn" style="display: none;">Stop Streaming</button>
+  
+  <div id="status" class="status disconnected">
+    Disconnected
+  </div>
+  
+  <div class="info">
+    💡 This extension captures audio and streams it to your backend server via WebRTC. Make sure your backend server is running and accessible.
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
