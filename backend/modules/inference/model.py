@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 from typing import Dict
 from config import StreamingConfig
+from .arch import AntiSpoofModel
 
 class StreamingAntiSpoofModel(nn.Module):
     """
@@ -16,19 +17,7 @@ class StreamingAntiSpoofModel(nn.Module):
         
         # Load the base model
         try:
-            loaded_obj = torch.load(model_path, map_location=config.device)
-            
-            # Handle State Dict (Weights only)
-            if isinstance(loaded_obj, dict):
-                print(f"Warning: Model file '{model_path}' contains weights (state_dict) but no architecture definition found. Using MockModel.")
-                # If we had the architecture:
-                # self.model = AASist()
-                # self.model.load_state_dict(loaded_obj)
-                self.model = MockModel()
-            else:
-                self.model = loaded_obj
-                self.model.eval()
-                
+            self.model = self.load_model(model_path)
         except Exception as e:
             print(f"Model Load Error: {e}. Using Mock.")
             self.model = MockModel()
@@ -42,6 +31,33 @@ class StreamingAntiSpoofModel(nn.Module):
                 self.model = torch.jit.script(self.model)
             except Exception as e:
                 print(f"TorchScript conversion failed: {e}")
+    
+    def load_model(self, path: str):
+        """Loads model weights into architecture"""
+        print(f"Loading model from {path}...")
+        
+        # 1. Load Checkpoint
+        checkpoint = torch.load(path, map_location=self.config.device, weights_only=True)
+        
+        # 2. Check if it's state_dict or full model
+        if isinstance(checkpoint, dict):
+             # It's weights (state_dict)
+             print("Detected state_dict. Initializing architecture...")
+             model = AntiSpoofModel()
+             
+             # Handle DataParallel casing if present (keys starting with 'module.')
+             if list(checkpoint.keys())[0].startswith('module.'):
+                 checkpoint = {k[7:]: v for k, v in checkpoint.items()}
+                 
+             model.load_state_dict(checkpoint, strict=False) # Allow lenient loading
+             model.to(self.config.device)
+             model.eval()
+             return model
+        else:
+             # Full model object
+             checkpoint.to(self.config.device)
+             checkpoint.eval()
+             return checkpoint
     
     @torch.no_grad()
     def forward_streaming(self, audio: np.ndarray) -> Dict[str, float]:

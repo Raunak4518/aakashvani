@@ -1,3 +1,10 @@
 fastapi
 uvicorn
 websockets
+aiortc
+torch
+torchaudio
+transformers
+soundfile
+numpy
+psutil
