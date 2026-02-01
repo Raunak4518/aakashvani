@@ -31,7 +31,8 @@ export const useWebRTC = () => {
             await pc.setLocalDescription(offer);
 
             // 6. Send Offer to Backend
-            const response = await axios.post('http://localhost:8000/api/v1/webrtc/offer', {
+            const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+            const response = await axios.post(`${apiUrl}/webrtc/offer`, {
                 sdp: pc.localDescription?.sdp,
                 type: pc.localDescription?.type
             });

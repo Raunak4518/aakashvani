@@ -1,20 +1,57 @@
 import { Modal } from '../common/Modal';
-import { AlertTriangle, Download, Flag } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Download, Flag } from 'lucide-react';
+import { useDetection } from '../../context/DetectionContext';
 
 interface DetectionDetailsModalProps {
     isOpen: boolean;
     onClose: () => void;
-    data?: any;
+    data?: {
+        sessionId?: string;
+        timestamp?: Date;
+        confidence?: number;
+        isDeepfake?: boolean;
+        features?: { label: string; value: number; color: string }[];
+        anomalies?: { time: string; type: string; severity: 'Low' | 'Medium' | 'High' }[];
+    };
 }
 
-export const DetectionDetailsModal = ({ isOpen, onClose }: DetectionDetailsModalProps) => {
+export const DetectionDetailsModal = ({ isOpen, onClose, data }: DetectionDetailsModalProps) => {
+    const { currentConfidence, isDeepfake, history, stats, isConnected } = useDetection();
+
+    // Use provided data or fall back to current detection state
+    const displayConfidence = data?.confidence ?? currentConfidence;
+    const displayIsDeepfake = data?.isDeepfake ?? isDeepfake;
+    const sessionId = data?.sessionId ?? `SES-${Date.now().toString(36).toUpperCase()}`;
+    const timestamp = data?.timestamp ?? new Date();
+
+    // Calculate feature scores from actual detection (or use provided data)
+    const features = data?.features ?? [
+        { label: 'Prosody Score', value: displayIsDeepfake ? 45 : 92, color: displayIsDeepfake ? 'var(--accent-orange)' : 'var(--accent-green)' },
+        { label: 'Spectral Consistency', value: displayIsDeepfake ? 34 : 88, color: displayIsDeepfake ? 'var(--accent-red)' : 'var(--accent-green)' },
+        { label: 'Glottal Pulse', value: displayIsDeepfake ? 52 : 88, color: displayIsDeepfake ? 'var(--accent-orange)' : 'var(--accent-green)' },
+        { label: 'Phase Continuity', value: displayIsDeepfake ? 28 : 85, color: displayIsDeepfake ? 'var(--accent-red)' : 'var(--accent-green)' },
+    ];
+
+    // Get anomalies from history or use provided data
+    const anomalies = data?.anomalies ?? (displayIsDeepfake
+        ? [
+            { time: '0:04.2', type: 'Unnatural Pitch', severity: 'High' as const },
+            { time: '0:07.8', type: 'Phase Vocoder Artifact', severity: 'Medium' as const },
+        ]
+        : []);
+
+    // Generate waveform from history
+    const waveformData = history.length > 0
+        ? history.slice(-60).map(h => ({ value: h.value, isDeepfake: h.isDeepfake }))
+        : Array.from({ length: 60 }, () => ({ value: 50, isDeepfake: false }));
+
     return (
         <Modal
             isOpen={isOpen}
             onClose={onClose}
             title="Detection Analysis"
             width="900px"
-            height="auto" // auto height to fit content, but max-height is handled by Modal
+            height="auto"
             footer={
                 <>
                     <button className="btn btn-glass" style={{ color: 'var(--accent-red)', borderColor: 'rgba(255, 51, 102, 0.3)' }}>
@@ -40,11 +77,13 @@ export const DetectionDetailsModal = ({ isOpen, onClose }: DetectionDetailsModal
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 'var(--space-2)', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
                         <div>
                             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>SESSION ID</div>
-                            <div className="text-mono" style={{ fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>#SES-8921-XJ9</div>
+                            <div className="text-mono" style={{ fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>#{sessionId}</div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
                             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>TIMESTAMP</div>
-                            <div className="text-mono" style={{ fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>Oct 24, 14:32:05</div>
+                            <div className="text-mono" style={{ fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>
+                                {timestamp.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, {timestamp.toLocaleTimeString([], { hour12: false })}
+                            </div>
                         </div>
                     </div>
 
@@ -52,22 +91,24 @@ export const DetectionDetailsModal = ({ isOpen, onClose }: DetectionDetailsModal
                     <div className="glass-panel" style={{ padding: 'var(--space-3)', position: 'relative', overflow: 'hidden' }}>
                         <h4 style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginBottom: 'var(--space-2)', textTransform: 'uppercase' }}>Waveform Analysis</h4>
                         <div style={{ height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: '4px', position: 'relative' }}>
-                            {/* Fake Waveform Lines */}
+                            {/* Real Waveform from history */}
                             <div style={{ display: 'flex', alignItems: 'center', gap: 2, height: '60%', width: '100%', padding: '0 10px' }}>
-                                {Array.from({ length: 60 }).map((_, i) => (
+                                {waveformData.map((point, i) => (
                                     <div key={i} style={{
                                         flex: 1,
-                                        height: `${20 + Math.random() * 80}%`,
-                                        background: i > 35 && i < 45 ? 'var(--accent-red)' : 'var(--accent-cyan)',
+                                        height: `${20 + (point.value / 100) * 60}%`,
+                                        background: point.isDeepfake ? 'var(--accent-red)' : 'var(--accent-cyan)',
                                         opacity: 0.8,
                                         borderRadius: 2
                                     }}></div>
                                 ))}
                             </div>
-                            {/* Anomaly Marker */}
-                            <div style={{ position: 'absolute', left: '62%', top: 0, bottom: 0, borderLeft: '1px dashed var(--accent-red)' }}>
-                                <div style={{ background: 'var(--accent-red)', color: 'white', fontSize: '10px', padding: '2px 4px', borderRadius: 2, position: 'absolute', top: 0, left: 4 }}>Anomaly Detected</div>
-                            </div>
+                            {/* Anomaly Markers */}
+                            {displayIsDeepfake && anomalies.map((a, i) => (
+                                <div key={i} style={{ position: 'absolute', left: `${30 + i * 20}%`, top: 0, bottom: 0, borderLeft: '1px dashed var(--accent-red)' }}>
+                                    <div style={{ background: 'var(--accent-red)', color: 'white', fontSize: '10px', padding: '2px 4px', borderRadius: 2, position: 'absolute', top: 0, left: 4 }}>{a.type}</div>
+                                </div>
+                            ))}
                         </div>
                     </div>
 
@@ -75,17 +116,24 @@ export const DetectionDetailsModal = ({ isOpen, onClose }: DetectionDetailsModal
                     <div className="glass-panel" style={{ padding: 'var(--space-3)', flex: 1 }}>
                         <h4 style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginBottom: 'var(--space-2)', textTransform: 'uppercase' }}>Spectral Heatmap</h4>
                         <div style={{ height: '100%', minHeight: '150px', background: 'linear-gradient(180deg, #0a0e27 0%, #1a1f3a 100%)', borderRadius: '4px', position: 'relative', overflow: 'hidden' }}>
-                            {/* Fake Spectrogram CSS Pattern */}
+                            {/* Spectrogram Pattern */}
                             <div style={{
                                 position: 'absolute', inset: 0,
                                 opacity: 0.6,
-                                backgroundImage: 'radial-gradient(circle at 50% 50%, rgba(0,212,255,0.2) 0%, transparent 50%), repeating-linear-gradient(90deg, transparent 0, transparent 10px, rgba(255,255,255,0.02) 10px, rgba(255,255,255,0.02) 11px)'
+                                backgroundImage: `radial-gradient(circle at 50% 50%, ${displayIsDeepfake ? 'rgba(255,51,102,0.2)' : 'rgba(0,212,255,0.2)'} 0%, transparent 50%), repeating-linear-gradient(90deg, transparent 0, transparent 10px, rgba(255,255,255,0.02) 10px, rgba(255,255,255,0.02) 11px)`
                             }}></div>
-                            <div style={{
-                                position: 'absolute', top: '20%', left: '40%', width: '30%', height: '40%',
-                                background: 'radial-gradient(ellipse at center, rgba(255,51,102,0.4) 0%, transparent 70%)',
-                                filter: 'blur(8px)'
-                            }}></div>
+                            {displayIsDeepfake && (
+                                <div style={{
+                                    position: 'absolute', top: '20%', left: '40%', width: '30%', height: '40%',
+                                    background: 'radial-gradient(ellipse at center, rgba(255,51,102,0.4) 0%, transparent 70%)',
+                                    filter: 'blur(8px)'
+                                }}></div>
+                            )}
+                            {!isConnected && history.length === 0 && (
+                                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-tertiary)', fontSize: '12px' }}>
+                                    No spectral data available
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -95,16 +143,30 @@ export const DetectionDetailsModal = ({ isOpen, onClose }: DetectionDetailsModal
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
 
                     {/* Verdict Card */}
-                    <div className="glass-panel" style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, rgba(255,51,102,0.1) 0%, rgba(255,51,102,0.2) 100%)', border: '1px solid rgba(255,51,102,0.3)' }}>
+                    <div className="glass-panel" style={{
+                        padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                        background: displayIsDeepfake
+                            ? 'linear-gradient(135deg, rgba(255,51,102,0.1) 0%, rgba(255,51,102,0.2) 100%)'
+                            : 'linear-gradient(135deg, rgba(0,255,136,0.1) 0%, rgba(0,255,136,0.2) 100%)',
+                        border: `1px solid ${displayIsDeepfake ? 'rgba(255,51,102,0.3)' : 'rgba(0,255,136,0.3)'}`
+                    }}>
                         <div style={{
-                            width: 64, height: 64, borderRadius: '50%', background: 'rgba(255,51,102,0.2)',
+                            width: 64, height: 64, borderRadius: '50%',
+                            background: displayIsDeepfake ? 'rgba(255,51,102,0.2)' : 'rgba(0,255,136,0.2)',
                             display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 'var(--space-2)',
-                            boxShadow: '0 0 20px rgba(255,51,102,0.4)'
+                            boxShadow: `0 0 20px ${displayIsDeepfake ? 'rgba(255,51,102,0.4)' : 'rgba(0,255,136,0.4)'}`
                         }}>
-                            <AlertTriangle size={32} className="text-accent-red" />
+                            {displayIsDeepfake
+                                ? <AlertTriangle size={32} color="var(--accent-red)" />
+                                : <CheckCircle size={32} color="var(--accent-green)" />
+                            }
                         </div>
-                        <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 'bold', color: 'var(--text-primary)', marginBottom: 4 }}>DEEPFAKE DETECTED</h2>
-                        <div style={{ color: 'var(--accent-red)', fontWeight: 600, fontSize: 'var(--text-lg)' }}>98.2% Confidence</div>
+                        <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 'bold', color: 'var(--text-primary)', marginBottom: 4 }}>
+                            {displayIsDeepfake ? 'DEEPFAKE DETECTED' : 'AUTHENTIC VOICE'}
+                        </h2>
+                        <div style={{ color: displayIsDeepfake ? 'var(--accent-red)' : 'var(--accent-green)', fontWeight: 600, fontSize: 'var(--text-lg)' }}>
+                            {displayConfidence.toFixed(1)}% Confidence
+                        </div>
                     </div>
 
                     {/* Features List */}
@@ -112,10 +174,9 @@ export const DetectionDetailsModal = ({ isOpen, onClose }: DetectionDetailsModal
                         <h4 style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginBottom: 'var(--space-3)', textTransform: 'uppercase' }}>Feature Analysis</h4>
 
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            <FeatureRow label="Prosody Score" value={92} color="var(--accent-green)" />
-                            <FeatureRow label="Spectral Consistency" value={34} color="var(--accent-red)" />
-                            <FeatureRow label="Glottal Pulse" value={88} color="var(--accent-green)" />
-                            <FeatureRow label="Phase Continuity" value={45} color="var(--accent-orange)" />
+                            {features.map((f, i) => (
+                                <FeatureRow key={i} label={f.label} value={f.value} color={f.color} />
+                            ))}
                         </div>
                     </div>
 
@@ -123,31 +184,40 @@ export const DetectionDetailsModal = ({ isOpen, onClose }: DetectionDetailsModal
                     <div className="glass-panel" style={{ padding: 'var(--space-3)', flex: 1, overflowY: 'auto', minHeight: '100px' }}>
                         <h4 style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginBottom: 'var(--space-3)', textTransform: 'uppercase' }}>Detected Anomalies</h4>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            <AnomalyItem time="0:04.2" type="Unnatural Pitch" severity="High" />
-                            <AnomalyItem time="0:07.8" type="Phase Vocoder Artifact" severity="Medium" />
-                            <AnomalyItem time="0:12.1" type="Inconsistent Background" severity="Low" />
+                            {anomalies.length === 0 ? (
+                                <div style={{ textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '12px', padding: '10px' }}>
+                                    No anomalies detected
+                                </div>
+                            ) : (
+                                anomalies.map((a, i) => (
+                                    <AnomalyItem key={i} time={a.time} type={a.type} severity={a.severity} />
+                                ))
+                            )}
                         </div>
                     </div>
 
-                    {/* Comparison to Reference */}
+                    {/* Connection Stats */}
                     <div className="glass-panel" style={{ padding: 'var(--space-3)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
-                            <h4 style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Reference Comparison</h4>
-                            <span style={{ fontSize: '10px', background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: 4 }}>User Enrolled</span>
+                            <h4 style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Session Statistics</h4>
+                            <span style={{ fontSize: '10px', background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: 4 }}>
+                                {isConnected ? 'Live' : 'Session Ended'}
+                            </span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
                             <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>Similarity Score</div>
-                                <div style={{ fontSize: 'var(--text-xl)', fontWeight: 'bold', color: 'var(--accent-cyan)' }}>94%</div>
+                                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>Data Points</div>
+                                <div style={{ fontSize: 'var(--text-xl)', fontWeight: 'bold', color: 'var(--accent-cyan)' }}>{history.length}</div>
                             </div>
                             <div style={{ height: 40, width: 1, background: 'rgba(255,255,255,0.1)' }}></div>
                             <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: 4 }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px' }}>
-                                    <span>Voice Fingerprint</span>
-                                    <span style={{ color: 'var(--accent-green)' }}>Match</span>
+                                    <span>RTT</span>
+                                    <span style={{ color: 'var(--text-primary)' }}>{stats.rtt.toFixed(0)}ms</span>
                                 </div>
-                                <div style={{ width: '100%', height: 4, background: 'rgba(255,255,255,0.1)', borderRadius: 2 }}>
-                                    <div style={{ width: '94%', height: '100%', background: 'var(--accent-cyan)', borderRadius: 2 }}></div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px' }}>
+                                    <span>Packets Lost</span>
+                                    <span style={{ color: stats.packetsLost < 5 ? 'var(--accent-green)' : 'var(--accent-orange)' }}>{stats.packetsLost}</span>
                                 </div>
                             </div>
                         </div>

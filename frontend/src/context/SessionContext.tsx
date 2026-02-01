@@ -1,37 +1,35 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
 
-export type SessionStatus = 'idle' | 'recording' | 'paused';
+export type SessionStatus = 'idle' | 'connecting' | 'recording' | 'paused' | 'error';
 
 interface SessionContextType {
     status: SessionStatus;
     startTime: number | null;
-    duration: number; // in seconds
+    duration: number;
     sessionId: string;
-    startSession: () => void;
+    errorMessage: string | null;
+    startSession: () => Promise<void>;
     pauseSession: () => void;
     stopSession: () => void;
+    setRecording: () => void;
+    setSessionError: (message: string) => void;
     formatTime: (seconds: number) => string;
 }
 
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
 
-import { useWebRTC } from '../hooks/useWebRTC';
-
 export const SessionProvider = ({ children }: { children: ReactNode }) => {
     const [status, setStatus] = useState<SessionStatus>('idle');
     const [startTime, setStartTime] = useState<number | null>(null);
     const [duration, setDuration] = useState(0);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [sessionId] = useState(`SES-${new Date().getFullYear()}-${Math.random().toString(36).substr(2, 4).toUpperCase()}`);
-
-    // WebRTC Hook
-    const { startConnection, stopConnection } = useWebRTC();
 
     useEffect(() => {
         let interval: ReturnType<typeof setInterval>;
 
         if (status === 'recording' && startTime) {
-            // Update duration every second based on elapsed time
             interval = setInterval(() => {
                 setDuration(Math.floor((Date.now() - startTime) / 1000));
             }, 1000);
@@ -40,39 +38,51 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
         return () => clearInterval(interval);
     }, [status, startTime]);
 
-    const startSession = async () => {
-        if (status === 'idle' || status === 'paused') {
+    const startSession = useCallback(async () => {
+        if (status === 'idle' || status === 'paused' || status === 'error') {
+            setStatus('connecting');
+            setErrorMessage(null);
             setStartTime(Date.now());
             setDuration(0);
-
-            // Start WebRTC Connection
-            try {
-                await startConnection();
-                setStatus('recording');
-            } catch (err) {
-                console.error("Failed to start WebRTC session", err);
-                // Optionally handle error state here
-            }
         }
-    };
+    }, [status]);
 
-    const pauseSession = () => setStatus('paused');
+    const pauseSession = useCallback(() => setStatus('paused'), []);
 
-    const stopSession = () => {
-        stopConnection(); // Stop WebRTC
+    const setRecording = useCallback(() => {
+        setStatus('recording');
+        setStartTime(Date.now());
+    }, []);
+
+    const stopSession = useCallback(() => {
         setStatus('idle');
         setStartTime(null);
         setDuration(0);
-    };
+        setErrorMessage(null);
+    }, []);
 
-    const formatTime = (totalSeconds: number) => {
+    const setSessionError = useCallback((message: string) => {
+        setStatus('error');
+        setErrorMessage(message);
+        setStartTime(null);
+        setDuration(0);
+        // Auto-clear error after 3 seconds
+        setTimeout(() => {
+            setStatus('idle');
+            setErrorMessage(null);
+        }, 3000);
+    }, []);
+
+    const formatTime = useCallback((totalSeconds: number) => {
         const hours = Math.floor(totalSeconds / 3600);
         const minutes = Math.floor((totalSeconds % 3600) / 60);
         const seconds = totalSeconds % 60;
 
         const pad = (n: number) => n.toString().padStart(2, '0');
-        return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
-    };
+        return hours > 0
+            ? `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
+            : `${pad(minutes)}:${pad(seconds)}`;
+    }, []);
 
     return (
         <SessionContext.Provider value={{
@@ -80,9 +90,12 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
             startTime,
             duration,
             sessionId,
+            errorMessage,
             startSession,
             pauseSession,
             stopSession,
+            setRecording,
+            setSessionError,
             formatTime
         }}>
             {children}

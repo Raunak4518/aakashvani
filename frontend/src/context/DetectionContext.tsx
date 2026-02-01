@@ -4,30 +4,65 @@ import { useNotifications } from './NotificationContext';
 import { useSession } from './SessionContext';
 import type { DetectionResult } from '../services/api';
 
+// Stored detection result for history
+export interface StoredDetection {
+    id: string;
+    timestamp: number;
+    status: 'authentic' | 'deepfake' | 'uncertain';
+    confidence: number;
+    duration: number;
+    method: string;
+}
+
 interface DetectionContextType {
     isConnected: boolean;
     isDeepfake: boolean;
     currentConfidence: number;
     history: { time: number, value: number, isDeepfake: boolean }[];
+    detectionHistory: StoredDetection[]; // Persisted session history
     audioStream: MediaStream | null;
-    audioContext: AudioContext | null; // Kept for visualizer but not used for transport
+    audioContext: AudioContext | null;
     startRecording: () => Promise<void>;
     stopRecording: () => void;
-    connectionState: string; // RTCIceConnectionState can be 'new' | 'checking' | ...
+    connectionState: string;
     stats: { rtt: number, packetsLost: number, bytesReceived: number };
+    saveCurrentSession: () => void; // Save current session to history
+    clearHistory: () => void; // Clear all stored history
 }
+
+const STORAGE_KEY = 'aakashvani_detection_history';
+
+const loadStoredHistory = (): StoredDetection[] => {
+    try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        return stored ? JSON.parse(stored) : [];
+    } catch {
+        return [];
+    }
+};
+
+const saveStoredHistory = (history: StoredDetection[]) => {
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+    } catch (e) {
+        console.error('Failed to save history to localStorage:', e);
+    }
+};
 
 const defaultContext: DetectionContextType = {
     isConnected: false,
     isDeepfake: false,
     currentConfidence: 0,
     history: [],
+    detectionHistory: [],
     audioStream: null,
     audioContext: null,
     startRecording: async () => { },
     stopRecording: () => { },
     connectionState: 'new',
-    stats: { rtt: 0, packetsLost: 0, bytesReceived: 0 }
+    stats: { rtt: 0, packetsLost: 0, bytesReceived: 0 },
+    saveCurrentSession: () => { },
+    clearHistory: () => { }
 };
 
 const DetectionContext = createContext<DetectionContextType>(defaultContext);
@@ -39,8 +74,10 @@ export const DetectionProvider = ({ children }: { children: ReactNode }) => {
     const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
     const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
     const [history, setHistory] = useState<{ time: number, value: number, isDeepfake: boolean }[]>([]);
+    const [detectionHistory, setDetectionHistory] = useState<StoredDetection[]>(loadStoredHistory);
     const [connectionState, setConnectionState] = useState<RTCIceConnectionState>('new');
     const [stats, setStats] = useState({ rtt: 0, packetsLost: 0, bytesReceived: 0 });
+    const sessionStartTime = useRef<number>(Date.now());
 
     const pcRef = useRef<RTCPeerConnection | null>(null);
     const dcRef = useRef<RTCDataChannel | null>(null);
@@ -48,10 +85,46 @@ export const DetectionProvider = ({ children }: { children: ReactNode }) => {
     const statsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const { addNotification } = useNotifications();
-    const { stopSession } = useSession();
+    const { stopSession, setRecording } = useSession();
     const historyStartTime = useRef(Date.now());
 
+    // Save current session to history
+    const saveCurrentSession = useCallback(() => {
+        if (history.length === 0) return;
+
+        // Calculate session summary
+        const avgConfidence = history.reduce((sum, h) => sum + h.value, 0) / history.length;
+        const hasDeepfake = history.some(h => h.isDeepfake);
+        const duration = history.length > 0 ? history[history.length - 1].time : 0;
+
+        const newSession: StoredDetection = {
+            id: `det-${Date.now().toString(36)}`,
+            timestamp: sessionStartTime.current,
+            status: hasDeepfake ? 'deepfake' : avgConfidence >= 70 ? 'authentic' : 'uncertain',
+            confidence: Math.round(avgConfidence),
+            duration: Math.round(duration * 10) / 10,
+            method: 'multi'
+        };
+
+        setDetectionHistory(prev => {
+            const updated = [newSession, ...prev].slice(0, 100); // Keep last 100 sessions
+            saveStoredHistory(updated);
+            return updated;
+        });
+    }, [history]);
+
+    // Clear all stored history
+    const clearHistory = useCallback(() => {
+        setDetectionHistory([]);
+        localStorage.removeItem(STORAGE_KEY);
+    }, []);
+
     const stopRecording = useCallback(() => {
+        // Save session before stopping
+        if (history.length > 0) {
+            saveCurrentSession();
+        }
+
         setIsConnected(false);
         setConnectionState('closed');
         setStats({ rtt: 0, packetsLost: 0, bytesReceived: 0 });
@@ -85,12 +158,16 @@ export const DetectionProvider = ({ children }: { children: ReactNode }) => {
             setAudioStream(null);
         }
 
+        // Clear current session history
+        setHistory([]);
+
         stopSession(); // Update session state
-    }, [audioStream, stopSession]);
+    }, [audioStream, stopSession, history, saveCurrentSession]);
 
     const startRecording = useCallback(async () => {
         try {
             setConnectionState('checking');
+            sessionStartTime.current = Date.now(); // Reset session start time
             // 1. Get Microphone
             console.log("STEP 1: Requesting Microphone Access...");
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -136,6 +213,7 @@ export const DetectionProvider = ({ children }: { children: ReactNode }) => {
             dc.onopen = () => {
                 console.log("STEP 5: WebRTC Data Channel OPEN");
                 setIsConnected(true);
+                setRecording(); // Update session status to 'recording'
                 historyStartTime.current = Date.now();
                 addNotification('info', 'Secured Audio Link Established (WebRTC)');
             };
@@ -222,7 +300,8 @@ export const DetectionProvider = ({ children }: { children: ReactNode }) => {
 
             // Send Offer to Backend
             console.log("STEP 3.3: Sending Offer to Backend API...");
-            const response = await fetch('http://localhost:8000/api/v1/webrtc/offer', {
+            const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+            const response = await fetch(`${apiUrl}/webrtc/offer`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -257,7 +336,21 @@ export const DetectionProvider = ({ children }: { children: ReactNode }) => {
     }, []);
 
     return (
-        <DetectionContext.Provider value={{ isConnected, currentConfidence, isDeepfake, history, audioStream, audioContext, startRecording, stopRecording, connectionState, stats }}>
+        <DetectionContext.Provider value={{
+            isConnected,
+            currentConfidence,
+            isDeepfake,
+            history,
+            detectionHistory,
+            audioStream,
+            audioContext,
+            startRecording,
+            stopRecording,
+            connectionState,
+            stats,
+            saveCurrentSession,
+            clearHistory
+        }}>
             {children}
         </DetectionContext.Provider>
     );

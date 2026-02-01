@@ -1,102 +1,110 @@
-import { X, WifiOff } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { Wifi, X, ChevronRight } from 'lucide-react';
+import { useDetection } from '../../context/DetectionContext';
 
 interface NetworkWarningProps {
-    isVisible?: boolean; // Can be controlled externally
     onDismiss?: () => void;
+    onShowDetails?: () => void;
 }
 
-export const NetworkWarning = ({ isVisible = false, onDismiss }: NetworkWarningProps) => {
-    const [visible, setVisible] = useState(isVisible);
-    const [stats, setStats] = useState({ packetLoss: 8.3, jitter: 52 });
+export const NetworkWarning = ({ onDismiss, onShowDetails }: NetworkWarningProps) => {
+    const [isVisible, setIsVisible] = useState(false);
+    const { stats, connectionState, isConnected } = useDetection();
 
+    // Show warning when network quality is poor
     useEffect(() => {
-        setVisible(isVisible);
-    }, [isVisible]);
+        if (!isConnected) {
+            setIsVisible(false);
+            return;
+        }
 
-    useEffect(() => {
-        // Simulate fluctuating network stats
-        const interval = setInterval(() => {
-            setStats(prev => ({
-                packetLoss: Math.max(0, prev.packetLoss + (Math.random() - 0.5) * 2),
-                jitter: Math.max(10, Math.floor(prev.jitter + (Math.random() - 0.5) * 10))
-            }));
-        }, 2000);
-        return () => clearInterval(interval);
-    }, []);
+        // Show warning if packet loss is high or RTT is high
+        const shouldShow = stats.packetsLost > 20 || stats.rtt > 200 || connectionState === 'disconnected' || connectionState === 'failed';
+        setIsVisible(shouldShow);
+    }, [stats, connectionState, isConnected]);
 
-    if (!visible) return null;
+    const handleDismiss = () => {
+        setIsVisible(false);
+        onDismiss?.();
+    };
+
+    if (!isVisible) return null;
 
     return (
-        <div style={{
+        <div className="animate-slide-in" style={{
             position: 'fixed',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '60px',
-            background: 'rgba(255, 51, 102, 0.15)',
-            backdropFilter: 'blur(20px)',
-            borderBottom: '1px solid rgba(255, 51, 102, 0.3)',
+            top: 'var(--space-4)',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 1000,
+            background: 'linear-gradient(135deg, rgba(255, 136, 0, 0.2) 0%, rgba(255, 136, 0, 0.1) 100%)',
+            border: '1px solid rgba(255, 136, 0, 0.4)',
+            borderRadius: 'var(--radius-lg)',
+            padding: 'var(--space-3) var(--space-4)',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 2000,
-            animation: 'slideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
-            boxShadow: '0 4px 30px rgba(0,0,0,0.2)'
+            gap: 'var(--space-3)',
+            backdropFilter: 'blur(16px)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.4), 0 0 20px rgba(255, 136, 0, 0.2)'
         }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', maxWidth: '1200px', width: '100%', padding: '0 var(--space-4)' }}>
-                {/* Icon & Main Message */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{
-                        width: 32, height: 32, borderRadius: '50%', background: 'rgba(255, 51, 102, 0.2)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        animation: 'pulse 2s infinite'
-                    }}>
-                        <WifiOff size={18} className="text-accent-red" />
-                    </div>
-                    <div>
-                        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Poor network quality detected</div>
-                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>Detection accuracy may be reduced due to signal instability.</div>
-                    </div>
-                </div>
+            {/* Icon */}
+            <div style={{
+                width: 40, height: 40,
+                borderRadius: '50%',
+                background: 'rgba(255, 136, 0, 0.2)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+            }}>
+                <Wifi size={20} color="var(--accent-orange)" />
+            </div>
 
-                {/* Tech Details */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '24px', marginLeft: 'auto', marginRight: 'auto' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                        <span style={{ fontSize: '10px', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Packet Loss</span>
-                        <span className="text-mono" style={{ color: 'var(--accent-red)', fontWeight: 600 }}>{stats.packetLoss.toFixed(1)}%</span>
-                    </div>
-                    <div style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.1)' }}></div>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                        <span style={{ fontSize: '10px', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Jitter</span>
-                        <span className="text-mono" style={{ color: 'var(--accent-orange)', fontWeight: 600 }}>{stats.jitter}ms</span>
-                    </div>
-                </div>
-
-                {/* Actions */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginLeft: 'auto' }}>
-                    <button className="btn btn-glass" style={{ height: 32, fontSize: '12px', padding: '0 12px' }}>
-                        View Details
-                    </button>
-                    <button
-                        onClick={() => {
-                            setVisible(false);
-                            onDismiss?.();
-                        }}
-                        style={{
-                            background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 4, borderRadius: '50%',
-                            transition: 'background 0.2s'
-                        }}
-                    >
-                        <X size={20} />
-                    </button>
+            {/* Content */}
+            <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600, marginBottom: 2, color: 'var(--accent-orange)' }}>Poor Network Quality Detected</div>
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', display: 'flex', gap: 'var(--space-4)' }}>
+                    <span>Packet Loss: <strong style={{ color: 'var(--accent-orange)' }}>{stats.packetsLost} pkts</strong></span>
+                    <span>RTT: <strong style={{ color: 'var(--text-primary)' }}>{stats.rtt.toFixed(0)}ms</strong></span>
                 </div>
             </div>
 
+            {/* Actions */}
+            <button
+                onClick={onShowDetails}
+                className="btn btn-glass"
+                style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px', borderColor: 'rgba(255, 136, 0, 0.3)' }}
+            >
+                View Details <ChevronRight size={14} />
+            </button>
+            <button
+                onClick={handleDismiss}
+                style={{
+                    width: 28, height: 28,
+                    borderRadius: '50%',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    background: 'rgba(255,255,255,0.05)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                }}
+            >
+                <X size={14} color="var(--text-secondary)" />
+            </button>
+
             <style>{`
-                @keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }
-                @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255, 51, 102, 0.4); } 70% { box-shadow: 0 0 0 10px rgba(255, 51, 102, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 51, 102, 0); } }
+                @keyframes slide-in {
+                    from { 
+                        opacity: 0; 
+                        transform: translateX(-50%) translateY(-20px); 
+                    }
+                    to { 
+                        opacity: 1; 
+                        transform: translateX(-50%) translateY(0); 
+                    }
+                }
+                .animate-slide-in { animation: slide-in 0.3s ease-out; }
             `}</style>
         </div>
     );

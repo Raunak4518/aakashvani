@@ -1,42 +1,48 @@
-import { ListFilter, CheckCircle, AlertTriangle, XCircle, ArrowRight } from 'lucide-react';
-import { useState } from 'react';
+import { ListFilter, CheckCircle, AlertTriangle, XCircle, ArrowRight, Trash2 } from 'lucide-react';
+import { useDetection, type StoredDetection } from '../../context/DetectionContext';
 
-// Define the shape of a detection item
-export interface DetectionItem {
-    id: string;
-    timestamp: number;
-    status: 'authentic' | 'deepfake' | 'uncertain' | 'analyzing';
-    confidence: number;
-    duration: number;
-    method: 'neural' | 'spectral' | 'prosody' | 'multi';
-}
+// Re-export for compatibility
+export type DetectionItem = StoredDetection;
 
 interface DetectionHistoryListProps {
-    items?: DetectionItem[]; // Optional for now, will mock if empty
+    items?: DetectionItem[];
 }
 
 export const DetectionHistoryList = ({ items = [] }: DetectionHistoryListProps) => {
-    // Mock data if no items provided
-    const displayItems = items.length > 0 ? items : [
-        { id: '1', timestamp: Date.now() - 100000, status: 'authentic', confidence: 94, duration: 8.3, method: 'multi' },
-        { id: '2', timestamp: Date.now() - 500000, status: 'uncertain', confidence: 62, duration: 4.1, method: 'spectral' },
-        { id: '3', timestamp: Date.now() - 900000, status: 'deepfake', confidence: 89, duration: 12.5, method: 'neural' }
-    ] as DetectionItem[];
+    const { detectionHistory, clearHistory } = useDetection();
+
+    // Use provided items or get from context (localStorage)
+    const displayItems = items.length > 0 ? items : detectionHistory;
 
     const getConfig = (status: string) => {
         switch (status) {
             case 'authentic': return { color: 'var(--accent-green)', icon: CheckCircle };
             case 'deepfake': return { color: 'var(--accent-red)', icon: XCircle };
             case 'uncertain': return { color: 'var(--accent-orange)', icon: AlertTriangle };
-            default: return { color: 'var(--text-secondary)', icon: AlertTriangle }; // analyzing
+            default: return { color: 'var(--text-secondary)', icon: AlertTriangle };
         }
     };
 
     return (
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
-                <span style={{ fontWeight: 600 }}>Recent Detections <span className="text-secondary" style={{ fontSize: '12px' }}>({displayItems.length})</span></span>
-                <ListFilter size={16} className="text-secondary" style={{ cursor: 'pointer' }} />
+                <span style={{ fontWeight: 600 }}>
+                    Recent Detections
+                    <span className="text-secondary" style={{ fontSize: '12px', marginLeft: 4 }}>
+                        ({displayItems.length})
+                    </span>
+                </span>
+                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                    {displayItems.length > 0 && (
+                        <Trash2
+                            size={14}
+                            className="text-secondary"
+                            style={{ cursor: 'pointer', opacity: 0.6 }}
+                            onClick={clearHistory}
+                        />
+                    )}
+                    <ListFilter size={16} className="text-secondary" style={{ cursor: 'pointer' }} />
+                </div>
             </div>
 
             <div style={{
@@ -48,6 +54,12 @@ export const DetectionHistoryList = ({ items = [] }: DetectionHistoryListProps) 
                 flexDirection: 'column',
                 gap: 'var(--space-2)'
             }} className="custom-scrollbar">
+                {displayItems.length === 0 && (
+                    <div style={{ textAlign: 'center', color: 'var(--text-tertiary)', padding: '20px', fontSize: '12px' }}>
+                        No detection history yet. Start a session to begin.
+                    </div>
+                )}
+
                 {displayItems.map((item) => {
                     const config = getConfig(item.status);
                     const Icon = config.icon;
@@ -73,9 +85,14 @@ export const DetectionHistoryList = ({ items = [] }: DetectionHistoryListProps) 
                             </div>
 
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
-                                <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: 4, background: `${config.color}20`, color: config.color }}>
-                                    {item.method}
-                                </span>
+                                <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+                                    <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: 4, background: `${config.color}20`, color: config.color }}>
+                                        {item.method}
+                                    </span>
+                                    <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.05)', color: 'var(--text-tertiary)' }}>
+                                        {item.duration}s
+                                    </span>
+                                </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 2, fontSize: '10px', color: 'var(--accent-cyan)' }}>
                                     Details <ArrowRight size={10} />
                                 </div>

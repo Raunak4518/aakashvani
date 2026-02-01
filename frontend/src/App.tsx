@@ -1,4 +1,4 @@
-import { useState, useEffect, Suspense, lazy } from 'react';
+import { useState, Suspense, lazy } from 'react';
 import './App.css';
 import { MainLayout } from './layouts/MainLayout';
 import { Header } from './components/Header';
@@ -16,69 +16,58 @@ import { AlertProvider } from './context/AlertContext';
 import { ToastContainer } from './components/notifications/ToastContainer';
 import { SessionProvider } from './context/SessionContext';
 import { NotificationProvider } from './context/NotificationContext';
+import { SettingsProvider } from './context/SettingsContext';
 
 function App() {
   // Modal States
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDetectionDetailsOpen, setIsDetectionDetailsOpen] = useState(false);
-  const [isSetupWizardOpen, setIsSetupWizardOpen] = useState(true); // Default open for demo
-  const [isNetworkWarningVisible, setIsNetworkWarningVisible] = useState(false);
-
-  // Network Warning Trigger Simulation
-  useEffect(() => {
-    // Show warning after 10 seconds for 8 seconds
-    const showTimer = setTimeout(() => setIsNetworkWarningVisible(true), 10000);
-    const hideTimer = setTimeout(() => setIsNetworkWarningVisible(false), 18000);
-    return () => {
-      clearTimeout(showTimer);
-      clearTimeout(hideTimer);
-    };
-  }, []);
+  const [isSetupWizardOpen, setIsSetupWizardOpen] = useState(false); // Default closed for production
 
   return (
-    <SessionProvider>
-      <NotificationProvider>
-        <AlertProvider>
-          <MainLayout
-            header={<Header onSettingsClick={() => setIsSettingsOpen(true)} />}
-            sidebar={<LeftSidebar />}
-            main={<MainWorkspace />}
-            rightPanel={<RightPanel onShowDetails={() => setIsDetectionDetailsOpen(true)} />}
-          />
+    <SettingsProvider>
+      <SessionProvider>
+        <NotificationProvider>
+          <AlertProvider>
+            <MainLayout
+              header={<Header onSettingsClick={() => setIsSettingsOpen(true)} />}
+              sidebar={<LeftSidebar />}
+              main={<MainWorkspace />}
+              rightPanel={<RightPanel onShowDetails={() => setIsDetectionDetailsOpen(true)} />}
+            />
 
-          {/* Global Modals & Overlays */}
-          <Suspense fallback={null}>
-            {isSettingsOpen && (
-              <SettingsModal
-                isOpen={isSettingsOpen}
-                onClose={() => setIsSettingsOpen(false)}
-              />
-            )}
+            {/* Global Modals & Overlays */}
+            <Suspense fallback={null}>
+              {isSettingsOpen && (
+                <SettingsModal
+                  isOpen={isSettingsOpen}
+                  onClose={() => setIsSettingsOpen(false)}
+                />
+              )}
 
-            {isDetectionDetailsOpen && (
-              <DetectionDetailsModal
-                isOpen={isDetectionDetailsOpen}
-                onClose={() => setIsDetectionDetailsOpen(false)}
-              />
-            )}
+              {isDetectionDetailsOpen && (
+                <DetectionDetailsModal
+                  isOpen={isDetectionDetailsOpen}
+                  onClose={() => setIsDetectionDetailsOpen(false)}
+                />
+              )}
 
-            {isSetupWizardOpen && (
-              <SetupWizard
-                isOpen={isSetupWizardOpen}
-                onClose={() => setIsSetupWizardOpen(false)}
-              />
-            )}
-          </Suspense>
+              {isSetupWizardOpen && (
+                <SetupWizard
+                  isOpen={isSetupWizardOpen}
+                  onClose={() => setIsSetupWizardOpen(false)}
+                />
+              )}
+            </Suspense>
 
-          <NetworkWarning
-            isVisible={isNetworkWarningVisible}
-            onDismiss={() => setIsNetworkWarningVisible(false)}
-          />
+            {/* Network Warning - now uses real data from DetectionContext */}
+            <NetworkWarning />
 
-          <ToastContainer />
-        </AlertProvider>
-      </NotificationProvider>
-    </SessionProvider>
+            <ToastContainer />
+          </AlertProvider>
+        </NotificationProvider>
+      </SessionProvider>
+    </SettingsProvider>
   );
 }
 

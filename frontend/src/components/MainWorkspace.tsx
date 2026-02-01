@@ -1,31 +1,102 @@
-import { useState } from 'react';
-import { Mic, Play, Square, RefreshCw, ShieldCheck, ChevronDown, Volume2, Activity, Bell } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Mic, Play, Square, RefreshCw, ShieldCheck, ChevronDown, Volume2, Activity, Loader2, AlertCircle } from 'lucide-react';
 import { SpectrogramViewer } from './specialized/SpectrogramViewer';
 import { ConfidenceTimeline } from './specialized/ConfidenceTimeline';
-import { useAlert } from '../context/AlertContext';
 import { useSession } from '../context/SessionContext';
 import { useDetection } from '../context/DetectionContext';
+import { useSettings } from '../context/SettingsContext';
 
 export const MainWorkspace = () => {
     const [showSpectrogram, setShowSpectrogram] = useState(false);
-    const { addAlert } = useAlert();
-    const { startSession, stopSession, status } = useSession();
-    const { startRecording, stopRecording, isConnected, isDeepfake, currentConfidence, connectionState, stats } = useDetection();
+    const { startSession, stopSession, status, setSessionError, errorMessage } = useSession();
+    const { startRecording, stopRecording, isConnected, isDeepfake, currentConfidence, connectionState, stats, audioContext, audioStream } = useDetection();
 
-    const triggerDemoAlerts = () => {
-        addAlert({ type: 'info', message: 'Sample processed', subMessage: 'Analysis complete in 120ms' });
-        setTimeout(() => addAlert({ type: 'success', message: 'Voice Authenticated', subMessage: 'Confidence > 98%' }), 1000);
-        setTimeout(() => addAlert({ type: 'warning', message: 'Network Jitter Detected', subMessage: 'Latency increased to 150ms' }), 3000);
-        setTimeout(() => addAlert({ type: 'error', message: 'Deepfake Pattern Detected', subMessage: 'Neural vocoder artifacts found' }), 5000);
-    };
+    // Derive connection states from session status
+    const isConnecting = status === 'connecting';
+    const connectionError = status === 'error' ? errorMessage : null;
+
+    // Settings for audio device
+    const { settings, audioDevices, updateSetting } = useSettings();
+    const [showDeviceDropdown, setShowDeviceDropdown] = useState(false);
+    const inputDevices = audioDevices.filter(d => d.kind === 'audioinput');
+    const selectedDevice = inputDevices.find(d => d.deviceId === settings.inputDevice) || inputDevices[0];
+
+    // Real audio visualization
+    const [audioLevels, setAudioLevels] = useState<number[]>(new Array(60).fill(5));
+    const analyserRef = useRef<AnalyserNode | null>(null);
+    const animationRef = useRef<number | null>(null);
+
+    // Setup audio analyzer for real waveform
+    useEffect(() => {
+        if (!audioContext || !audioStream || !isConnected) {
+            setAudioLevels(new Array(60).fill(5));
+            return;
+        }
+
+        try {
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 128;
+            const source = audioContext.createMediaStreamSource(audioStream);
+            source.connect(analyser);
+            analyserRef.current = analyser;
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+            const updateLevels = () => {
+                if (!analyserRef.current) return;
+
+                analyserRef.current.getByteFrequencyData(dataArray);
+
+                // Map frequency data to 60 bars
+                const levels: number[] = [];
+                const step = Math.floor(dataArray.length / 60);
+                for (let i = 0; i < 60; i++) {
+                    const value = dataArray[i * step] || 0;
+                    levels.push(Math.max(5, (value / 255) * 100));
+                }
+                setAudioLevels(levels);
+
+                animationRef.current = requestAnimationFrame(updateLevels);
+            };
+
+            updateLevels();
+
+            return () => {
+                if (animationRef.current) {
+                    cancelAnimationFrame(animationRef.current);
+                }
+                source.disconnect();
+            };
+        } catch (e) {
+            console.error("Failed to setup audio analyzer:", e);
+        }
+    }, [audioContext, audioStream, isConnected]);
 
     const handleToggleRecording = async () => {
-        if (status === 'recording') {
+        if (status === 'recording' || status === 'connecting') {
             stopSession();
             stopRecording();
         } else {
-            await startSession();
-            await startRecording();
+            try {
+                await startSession(); // Sets status to 'connecting'
+
+                // Add timeout for connection attempt (10 seconds)
+                const connectionTimeout = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('Connection timeout')), 10000)
+                );
+
+                await Promise.race([
+                    startRecording(),
+                    connectionTimeout
+                ]);
+            } catch (error) {
+                console.error('Connection failed:', error);
+                const errorMsg = error instanceof Error && error.message === 'Connection timeout'
+                    ? 'Something went wrong - connection timed out'
+                    : 'Something went wrong';
+                setSessionError(errorMsg);
+                stopRecording();
+            }
         }
     };
 
@@ -41,9 +112,6 @@ export const MainWorkspace = () => {
                         style={{ display: 'flex', alignItems: 'center', gap: 8, borderColor: showSpectrogram ? 'var(--accent-cyan)' : undefined }}
                     >
                         <Activity size={16} /> {showSpectrogram ? 'Hide Spectrogram' : 'Show Spectrogram'}
-                    </button>
-                    <button className="btn btn-glass" onClick={triggerDemoAlerts} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Bell size={16} /> Test Alerts
                     </button>
                 </div>
             </div>
@@ -91,90 +159,330 @@ export const MainWorkspace = () => {
                     <div style={{ position: 'absolute', top: '75%', width: '100%', height: 1, background: 'rgba(255,255,255,0.05)' }}></div>
                 </div>
 
-                {/* Waveform Bars */}
+                {/* Real Waveform Bars */}
                 <div style={{ display: 'flex', alignItems: 'flex-end', gap: '4px', height: '60%', width: '100%', justifyContent: 'center' }}>
-                    {Array.from({ length: 60 }).map((_, i) => {
-                        const height = Math.random() * 80 + 10;
-                        // Color logic based on "mock" suspicion
+                    {audioLevels.map((level, i) => {
+                        // Color based on deepfake detection
                         let color = 'var(--accent-green)';
-                        if (i > 40 && i < 50) color = 'var(--accent-red)'; // Suspicious segment
-                        else if (i > 20 && i < 30) color = 'var(--accent-orange)'; // Analyzing
+                        if (isDeepfake) color = 'var(--accent-red)';
+                        else if (currentConfidence > 0 && currentConfidence < 70) color = 'var(--accent-orange)';
 
                         return (
                             <div key={i} style={{
                                 flex: 1,
-                                height: `${isConnected ? height : 5}%`, // Active bars only if connected
+                                height: `${level}%`,
                                 background: `linear-gradient(to top, ${color}, transparent)`,
                                 borderRadius: 2,
                                 opacity: 0.8,
-                                transition: 'height 0.1s ease'
+                                transition: 'height 0.05s ease'
                             }}></div>
                         )
                     })}
-                </div>
-
-                {/* Time Markers */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-                    <span className="text-mono" style={{ fontSize: 10, color: 'var(--text-secondary)' }}>00:00</span>
-                    <span className="text-mono" style={{ fontSize: 10, color: 'var(--text-secondary)' }}>00:03</span>
-                    <span className="text-mono" style={{ fontSize: 10, color: 'var(--text-secondary)' }}>00:06</span>
-                    <span className="text-mono" style={{ fontSize: 10, color: 'var(--text-secondary)' }}>00:10</span>
                 </div>
             </div>
 
             {/* Confidence Timeline */}
             <ConfidenceTimeline />
 
-            {/* Audio Control Panel */}
-            <div className="glass-panel" style={{ padding: 'var(--space-4)', display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 'var(--space-4)' }}>
+            {/* Audio Control Panel - Improved Design */}
+            <div className="glass-panel" style={{
+                padding: 'var(--space-4)',
+                display: 'grid',
+                gridTemplateColumns: '1fr auto 1fr',
+                alignItems: 'center',
+                gap: 'var(--space-4)',
+                background: 'linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)'
+            }}>
 
-                {/* Input Source */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div className="glass-panel" style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', borderRadius: 20 }}>
-                        <Mic size={16} />
-                        <span style={{ fontSize: 'var(--text-sm)' }}>System Default</span>
-                        <ChevronDown size={14} />
+                {/* Left: Input Source + Level Meter */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+                    {/* Input Device Selector */}
+                    <div style={{ position: 'relative' }}>
+                        <div
+                            className="glass-panel"
+                            onClick={() => setShowDeviceDropdown(!showDeviceDropdown)}
+                            style={{
+                                padding: '10px 16px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 10,
+                                cursor: 'pointer',
+                                borderRadius: 24,
+                                transition: 'all 0.2s',
+                                border: showDeviceDropdown ? '1px solid var(--accent-cyan)' : '1px solid rgba(255,255,255,0.1)'
+                            }}
+                        >
+                            <div style={{
+                                width: 32, height: 32,
+                                borderRadius: '50%',
+                                background: isConnected ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.05)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                border: isConnected ? '1px solid rgba(0,255,136,0.3)' : '1px solid rgba(255,255,255,0.1)'
+                            }}>
+                                <Mic size={16} color={isConnected ? 'var(--accent-green)' : 'var(--text-secondary)'} />
+                            </div>
+                            <div>
+                                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginBottom: 2 }}>INPUT</div>
+                                <div style={{ fontSize: 'var(--text-sm)', fontWeight: 500, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {selectedDevice?.label || 'Select Device'}
+                                </div>
+                            </div>
+                            <ChevronDown size={16} color="var(--text-secondary)" style={{ marginLeft: 4, transform: showDeviceDropdown ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s' }} />
+                        </div>
+
+                        {/* Device Dropdown */}
+                        {showDeviceDropdown && (
+                            <div
+                                className="glass-panel"
+                                style={{
+                                    position: 'absolute',
+                                    top: '100%',
+                                    left: 0,
+                                    marginTop: 8,
+                                    minWidth: 250,
+                                    zIndex: 100,
+                                    padding: 'var(--space-2)',
+                                    borderRadius: 12,
+                                    background: 'rgba(10, 14, 39, 0.95)',
+                                    border: '1px solid rgba(255,255,255,0.1)',
+                                    boxShadow: '0 10px 40px rgba(0,0,0,0.5)'
+                                }}
+                            >
+                                {inputDevices.length === 0 ? (
+                                    <div style={{ padding: 12, color: 'var(--text-tertiary)', fontSize: 'var(--text-sm)' }}>
+                                        No microphones found
+                                    </div>
+                                ) : (
+                                    inputDevices.map(device => (
+                                        <div
+                                            key={device.deviceId}
+                                            onClick={() => {
+                                                updateSetting('inputDevice', device.deviceId);
+                                                setShowDeviceDropdown(false);
+                                            }}
+                                            style={{
+                                                padding: '10px 12px',
+                                                borderRadius: 8,
+                                                cursor: 'pointer',
+                                                background: device.deviceId === settings.inputDevice ? 'rgba(0, 212, 255, 0.1)' : 'transparent',
+                                                color: device.deviceId === settings.inputDevice ? 'var(--accent-cyan)' : 'var(--text-primary)',
+                                                fontSize: 'var(--text-sm)',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: 8,
+                                                transition: 'background 0.2s'
+                                            }}
+                                        >
+                                            <Mic size={14} />
+                                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                {device.label}
+                                            </span>
+                                            {device.deviceId === settings.inputDevice && (
+                                                <span style={{ marginLeft: 'auto', color: 'var(--accent-green)' }}>✓</span>
+                                            )}
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Audio Level Meter */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 80 }}>
+                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>LEVEL</div>
+                        <div style={{ display: 'flex', gap: 2, height: 20, alignItems: 'flex-end' }}>
+                            {Array.from({ length: 10 }).map((_, i) => {
+                                const threshold = (i + 1) * 10;
+                                const avgLevel = audioLevels.reduce((a, b) => a + b, 0) / audioLevels.length;
+                                const isActive = isConnected && avgLevel >= threshold;
+                                let color = 'rgba(255,255,255,0.1)';
+                                if (isActive) {
+                                    if (i < 6) color = 'var(--accent-green)';
+                                    else if (i < 8) color = 'var(--accent-orange)';
+                                    else color = 'var(--accent-red)';
+                                }
+                                return (
+                                    <div key={i} style={{
+                                        flex: 1,
+                                        height: `${40 + i * 6}%`,
+                                        background: color,
+                                        borderRadius: 2,
+                                        transition: 'background 0.1s'
+                                    }} />
+                                );
+                            })}
+                        </div>
                     </div>
                 </div>
 
-                {/* Playback Controls */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-6)' }}>
-                    <button className="btn btn-glass" style={{ width: 48, height: 48, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Play size={20} fill="white" style={{ marginLeft: 2 }} />
-                    </button>
-
+                {/* Center: Main Controls */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
+                    {/* Skip Back / Previous */}
                     <button
-                        onClick={handleToggleRecording}
-                        className={status === 'recording' ? 'btn-pulse' : ''}
+                        className="btn btn-glass"
                         style={{
-                            width: 72, height: 72, borderRadius: '50%',
-                            background: status === 'recording' ? 'rgba(255, 51, 102, 0.3)' : 'rgba(255, 51, 102, 0.15)',
-                            border: '1px solid var(--accent-red)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            boxShadow: status === 'recording' ? '0 0 30px rgba(255, 51, 102, 0.5)' : '0 0 20px rgba(255, 51, 102, 0.3)',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s',
-                            transform: status === 'recording' ? 'scale(1.05)' : 'scale(1)'
-                        }}>
-                        <div style={{ width: 60, height: 60, borderRadius: status === 'recording' ? '20%' : '50%', background: 'var(--accent-red)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'inset 0 0 10px rgba(0,0,0,0.2)', transition: 'all 0.3s' }}>
-                            {status === 'recording' ? (
-                                <Square size={24} fill="white" color="white" />
-                            ) : (
-                                <Mic size={28} color="white" />
-                            )}
-                        </div>
+                            width: 48, height: 48,
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            opacity: 0.6,
+                            cursor: 'not-allowed'
+                        }}
+                        disabled
+                    >
+                        <Play size={18} color="var(--text-secondary)" style={{ transform: 'rotate(180deg)' }} />
                     </button>
 
-                    <button className="btn btn-glass" style={{ width: 48, height: 48, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Volume2 size={20} />
+                    {/* Main Record Button */}
+                    <div style={{ position: 'relative' }}>
+                        <button
+                            onClick={handleToggleRecording}
+                            disabled={isConnecting}
+                            className={status === 'recording' ? 'btn-pulse' : ''}
+                            style={{
+                                width: 80, height: 80,
+                                borderRadius: '50%',
+                                background: isConnecting
+                                    ? 'radial-gradient(circle, rgba(0, 212, 255, 0.3) 0%, rgba(0, 212, 255, 0.1) 100%)'
+                                    : connectionError
+                                        ? 'radial-gradient(circle, rgba(255, 136, 0, 0.3) 0%, rgba(255, 136, 0, 0.1) 100%)'
+                                        : status === 'recording'
+                                            ? 'radial-gradient(circle, rgba(255, 51, 102, 0.4) 0%, rgba(255, 51, 102, 0.2) 100%)'
+                                            : 'radial-gradient(circle, rgba(255, 51, 102, 0.2) 0%, rgba(255, 51, 102, 0.1) 100%)',
+                                border: `2px solid ${isConnecting ? 'var(--accent-cyan)' : connectionError ? 'var(--accent-orange)' : 'var(--accent-red)'}`,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                boxShadow: isConnecting
+                                    ? '0 0 40px rgba(0, 212, 255, 0.5)'
+                                    : status === 'recording'
+                                        ? '0 0 40px rgba(255, 51, 102, 0.6), inset 0 0 20px rgba(255, 51, 102, 0.3)'
+                                        : '0 0 20px rgba(255, 51, 102, 0.3)',
+                                cursor: isConnecting ? 'wait' : 'pointer',
+                                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                transform: status === 'recording' ? 'scale(1.05)' : 'scale(1)',
+                                position: 'relative',
+                                opacity: isConnecting ? 0.9 : 1
+                            }}
+                        >
+                            {/* Animated ring when recording */}
+                            {status === 'recording' && (
+                                <div style={{
+                                    position: 'absolute',
+                                    inset: -4,
+                                    borderRadius: '50%',
+                                    border: '2px solid var(--accent-red)',
+                                    opacity: 0.5,
+                                    animation: 'ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite'
+                                }} />
+                            )}
+                            {/* Spinning ring when connecting */}
+                            {isConnecting && (
+                                <div style={{
+                                    position: 'absolute',
+                                    inset: -4,
+                                    borderRadius: '50%',
+                                    border: '2px solid transparent',
+                                    borderTopColor: 'var(--accent-cyan)',
+                                    borderRightColor: 'var(--accent-cyan)',
+                                    animation: 'spin 1s linear infinite'
+                                }} />
+                            )}
+                            <div style={{
+                                width: 64, height: 64,
+                                borderRadius: status === 'recording' ? '16px' : '50%',
+                                background: isConnecting
+                                    ? 'linear-gradient(135deg, var(--accent-cyan) 0%, #0099cc 100%)'
+                                    : connectionError
+                                        ? 'linear-gradient(135deg, var(--accent-orange) 0%, #cc7700 100%)'
+                                        : 'linear-gradient(135deg, var(--accent-red) 0%, #ff1a4b 100%)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                boxShadow: 'inset 0 2px 10px rgba(255,255,255,0.2), inset 0 -2px 10px rgba(0,0,0,0.2)',
+                                transition: 'all 0.3s'
+                            }}>
+                                {isConnecting ? (
+                                    <Loader2 size={28} color="white" style={{ animation: 'spin 1s linear infinite' }} />
+                                ) : connectionError ? (
+                                    <AlertCircle size={28} color="white" />
+                                ) : status === 'recording' ? (
+                                    <Square size={26} fill="white" color="white" />
+                                ) : (
+                                    <Mic size={30} color="white" />
+                                )}
+                            </div>
+                        </button>
+
+                        {/* Status Text Below Button */}
+                        <div style={{
+                            position: 'absolute',
+                            bottom: -24,
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            whiteSpace: 'nowrap',
+                            fontSize: '11px',
+                            fontWeight: 500,
+                            color: isConnecting ? 'var(--accent-cyan)' : connectionError ? 'var(--accent-orange)' : status === 'recording' ? 'var(--accent-red)' : 'var(--text-tertiary)',
+                            transition: 'all 0.3s'
+                        }}>
+                            {isConnecting ? 'Connecting...' : connectionError ? 'Failed!' : status === 'recording' ? 'Recording' : 'Ready'}
+                        </div>
+                    </div>
+
+                    {/* Skip Forward / Next */}
+                    <button
+                        className="btn btn-glass"
+                        style={{
+                            width: 48, height: 48,
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            opacity: 0.6,
+                            cursor: 'not-allowed'
+                        }}
+                        disabled
+                    >
+                        <Play size={18} color="var(--text-secondary)" />
                     </button>
                 </div>
 
-                {/* Session Control */}
+                {/* Right: Volume + Reset */}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 'var(--space-3)' }}>
-                    <div className="text-mono" style={{ fontSize: 'var(--text-base)' }}>00:12 / 10:00</div>
-                    <button className="btn btn-glass" style={{ width: 40, height: 40, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <RefreshCw size={16} />
+                    {/* Volume Control */}
+                    <button
+                        className="btn btn-glass"
+                        style={{
+                            width: 44, height: 44,
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            transition: 'all 0.2s'
+                        }}
+                    >
+                        <Volume2 size={18} color="var(--text-secondary)" />
+                    </button>
+
+                    {/* Reset Button */}
+                    <button
+                        onClick={() => {
+                            if (status === 'recording') {
+                                stopSession();
+                                stopRecording();
+                            }
+                        }}
+                        className="btn btn-glass"
+                        style={{
+                            width: 44, height: 44,
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            transition: 'all 0.2s',
+                            opacity: status === 'recording' ? 1 : 0.5
+                        }}
+                        disabled={status !== 'recording'}
+                    >
+                        <RefreshCw size={16} color="var(--text-secondary)" />
                     </button>
                 </div>
             </div>
@@ -233,6 +541,14 @@ export const MainWorkspace = () => {
 
             <style>{`
                 @keyframes slideInDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+                @keyframes ping { 
+                    0% { transform: scale(1); opacity: 0.5; } 
+                    75%, 100% { transform: scale(1.3); opacity: 0; } 
+                }
+                @keyframes spin {
+                    from { transform: rotate(0deg); }
+                    to { transform: rotate(360deg); }
+                }
             `}</style>
         </div>
     );

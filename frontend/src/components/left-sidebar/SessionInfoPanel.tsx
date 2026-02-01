@@ -1,36 +1,27 @@
-import { Copy, Clock, Activity } from 'lucide-react';
+import { Copy } from 'lucide-react';
 import { useSession } from '../../context/SessionContext';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 export const SessionInfoPanel = () => {
-    const { session, duration, status } = useSession();
+    const { sessionId, startTime, status } = useSession();
     const [copied, setCopied] = useState(false);
 
     const handleCopy = () => {
-        if (session?.id) {
-            navigator.clipboard.writeText(session.id);
+        if (sessionId) {
+            navigator.clipboard.writeText(sessionId);
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
         }
     };
 
-    // Format duration helper
-    const formatDuration = (ms: number) => {
-        const seconds = Math.floor(ms / 1000);
-        const h = Math.floor(seconds / 3600);
-        const m = Math.floor((seconds % 3600) / 60);
-        const s = seconds % 60;
-        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    };
-
     const statusConfig = {
         idle: { color: 'var(--text-secondary)', text: 'Idle', dot: 'gray' },
+        connecting: { color: 'var(--accent-cyan)', text: 'Connecting...', dot: 'var(--accent-cyan)' },
         recording: { color: 'var(--accent-green)', text: 'Session Active', dot: 'var(--accent-green)' },
         paused: { color: 'var(--accent-orange)', text: 'Session Paused', dot: 'var(--accent-orange)' },
-        ended: { color: 'var(--accent-red)', text: 'Session Ended', dot: 'var(--accent-red)' }
+        error: { color: 'var(--accent-red)', text: 'Error', dot: 'var(--accent-red)' }
     };
 
-    // Explicitly cast status to a known key or fallback
     const currentStatus = statusConfig[status as keyof typeof statusConfig] || statusConfig.idle;
 
     return (
@@ -45,7 +36,7 @@ export const SessionInfoPanel = () => {
                     <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>ID</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                         <span className="text-mono" style={{ fontSize: 'var(--text-sm)' }}>
-                            {session?.id || 'NO-SESSION'}
+                            {sessionId || 'NO-SESSION'}
                         </span>
                         <Copy
                             size={12}
@@ -60,15 +51,7 @@ export const SessionInfoPanel = () => {
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>Started</span>
                     <span style={{ fontSize: 'var(--text-sm)' }}>
-                        {session?.startTime ? new Date(session.startTime).toLocaleTimeString() : '--:--:--'}
-                    </span>
-                </div>
-
-                {/* Duration */}
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>Duration</span>
-                    <span className="text-mono" style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>
-                        {formatDuration(duration)}
+                        {startTime ? new Date(startTime).toLocaleTimeString() : '--:--:--'}
                     </span>
                 </div>
 

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Modal } from '../common/Modal';
-import { Save, Mic, Volume2, Cpu, Database, Globe, Moon, Clock, Shield, Activity, RefreshCw, Trash2, Download } from 'lucide-react';
+import { Save, Mic, Volume2, Cpu, Database, Globe, Moon, Activity, RefreshCw, Trash2, Download } from 'lucide-react';
+import { useSettings } from '../../context/SettingsContext';
 
 interface SettingsModalProps {
     isOpen: boolean;
@@ -9,6 +10,10 @@ interface SettingsModalProps {
 
 export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
     const [activeTab, setActiveTab] = useState('general');
+    const { settings, updateSetting, saveSettings, resetSettings, audioDevices, hasUnsavedChanges } = useSettings();
+
+    const inputDevices = audioDevices.filter(d => d.kind === 'audioinput');
+    const outputDevices = audioDevices.filter(d => d.kind === 'audiooutput');
 
     const tabs = [
         { id: 'general', label: 'General', icon: <Globe size={16} /> },
@@ -16,6 +21,11 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
         { id: 'detection', label: 'Detection', icon: <Cpu size={16} /> },
         { id: 'advanced', label: 'Advanced', icon: <Database size={16} /> },
     ];
+
+    const handleSave = () => {
+        saveSettings();
+        onClose();
+    };
 
     return (
         <Modal
@@ -27,7 +37,11 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
             footer={
                 <>
                     <button className="btn btn-glass" onClick={onClose}>Cancel</button>
-                    <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button
+                        className="btn btn-primary"
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: hasUnsavedChanges ? 1 : 0.5 }}
+                        onClick={handleSave}
+                    >
                         <Save size={16} /> Save & Apply
                     </button>
                 </>
@@ -68,26 +82,37 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
                             <Section title="Appearance">
                                 <Select
                                     label="Theme Mode"
-                                    options={['Dark Mode (Default)', 'Light Mode', 'Auto (System)']}
-                                    selected="Dark Mode (Default)"
+                                    options={[
+                                        { value: 'dark', label: 'Dark Mode (Default)' },
+                                        { value: 'light', label: 'Light Mode' },
+                                        { value: 'auto', label: 'Auto (System)' }
+                                    ]}
+                                    value={settings.theme}
+                                    onChange={(v) => updateSetting('theme', v as 'dark' | 'light' | 'auto')}
                                     icon={<Moon size={14} />}
                                 />
                                 <Select
                                     label="Language"
-                                    options={['English (US)', 'Hindi', 'Spanish', 'French']}
-                                    selected="English (US)"
+                                    options={[
+                                        { value: 'English (US)', label: 'English (US)' },
+                                        { value: 'Hindi', label: 'Hindi' },
+                                        { value: 'Spanish', label: 'Spanish' }
+                                    ]}
+                                    value={settings.language}
+                                    onChange={(v) => updateSetting('language', v)}
                                     icon={<Globe size={14} />}
                                 />
                             </Section>
 
                             <Section title="System">
-                                <Select
-                                    label="Timezone"
-                                    options={['(UTC-05:00) Eastern Time', '(UTC+00:00) UTC', '(UTC+05:30) IST']}
-                                    selected="(UTC+05:30) IST"
-                                    icon={<Clock size={14} />}
+                                <Slider
+                                    label="Session Timeout"
+                                    value={settings.sessionTimeout}
+                                    min={5}
+                                    max={120}
+                                    unit=" min"
+                                    onChange={(v) => updateSetting('sessionTimeout', v)}
                                 />
-                                <Toggle label="Auto-save Session Data" checked={true} description="Automatically save analysis results locally" />
                             </Section>
                         </div>
                     )}
@@ -97,7 +122,9 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
                             <Section title="Input & Output">
                                 <Select
                                     label="Input Device (Microphone)"
-                                    options={['Default - MacBook Pro Mic', 'External USB Mic (Blue Yeti)', 'Virtual Cable A']}
+                                    options={inputDevices.map(d => ({ value: d.deviceId, label: d.label }))}
+                                    value={settings.inputDevice}
+                                    onChange={(v) => updateSetting('inputDevice', v)}
                                     icon={<Mic size={14} />}
                                 />
                                 <div style={{ marginTop: 8 }}>
@@ -108,40 +135,97 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
                                 <div style={{ height: 'var(--space-2)' }} />
                                 <Select
                                     label="Output Device"
-                                    options={['Default - MacBook Pro Speakers', 'External Headphones']}
+                                    options={outputDevices.map(d => ({ value: d.deviceId, label: d.label }))}
+                                    value={settings.outputDevice}
+                                    onChange={(v) => updateSetting('outputDevice', v)}
                                     icon={<Volume2 size={14} />}
                                 />
                             </Section>
 
                             <Section title="Processing">
-                                <Toggle label="Noise Cancellation" checked={true} description="Reduce background noise from input" />
-                                <Toggle label="Auto Gain Control" checked={true} description="Normalize audio volume automatically" />
+                                <Toggle
+                                    label="Noise Reduction"
+                                    checked={settings.noiseReduction}
+                                    onChange={(v) => updateSetting('noiseReduction', v)}
+                                    description="Reduce background noise from input"
+                                />
+                                <Toggle
+                                    label="Echo Cancellation"
+                                    checked={settings.echoCancellation}
+                                    onChange={(v) => updateSetting('echoCancellation', v)}
+                                    description="Remove echo from audio"
+                                />
+                                <Toggle
+                                    label="Auto Gain Control"
+                                    checked={settings.autoGainControl}
+                                    onChange={(v) => updateSetting('autoGainControl', v)}
+                                    description="Normalize audio volume automatically"
+                                />
                             </Section>
 
                             <Section title="Quality">
-                                <Select label="Sample Rate" options={['16000 Hz', '24000 Hz', '44100 Hz', '48000 Hz']} selected="48000 Hz" />
-                                <Slider label="Buffer Size" value={512} min={128} max={2048} unit=" samples" />
+                                <Select
+                                    label="Sample Rate"
+                                    options={[
+                                        { value: '16000', label: '16000 Hz' },
+                                        { value: '24000', label: '24000 Hz' },
+                                        { value: '44100', label: '44100 Hz' },
+                                        { value: '48000', label: '48000 Hz' }
+                                    ]}
+                                    value={String(settings.sampleRate)}
+                                    onChange={(v) => updateSetting('sampleRate', parseInt(v))}
+                                />
+                                <Slider
+                                    label="Buffer Size"
+                                    value={settings.bufferSize}
+                                    min={256}
+                                    max={8192}
+                                    unit=" samples"
+                                    onChange={(v) => updateSetting('bufferSize', v)}
+                                />
                             </Section>
                         </div>
                     )}
 
                     {activeTab === 'detection' && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-                            <Section title="Active Algorithms">
-                                <Checkbox label="Spectral Analysis" checked={true} description="Analyze frequency spectrum inconsistencies" />
-                                <Checkbox label="Neural Vocoder Detection" checked={true} description="Detect artifacts from GAN-based vocoders" />
-                                <Checkbox label="Prosody Analysis" checked={true} description="Analyze speech rhythm and intonation" />
-                                <Checkbox label="Multi-modal Fusion" checked={false} description="Combine audio with video cues (if available)" />
-                            </Section>
                             <Section title="Sensitivity & Thresholds">
-                                <Slider label="Confidence Threshold" value={70} min={50} max={95} unit="%" />
-                                <Select
-                                    label="False Positive Tolerance"
-                                    options={['Low (Strict)', 'Medium (Balanced)', 'High (Permissive)']}
-                                    selected="Medium (Balanced)"
-                                    icon={<Shield size={14} />}
+                                <Slider
+                                    label="Confidence Threshold"
+                                    value={settings.sensitivityThreshold}
+                                    min={50}
+                                    max={95}
+                                    unit="%"
+                                    onChange={(v) => updateSetting('sensitivityThreshold', v)}
                                 />
-                                <Toggle label="Enable Experimental Features" checked={false} description="Use beta detection models" />
+                                <Slider
+                                    label="Analysis Window"
+                                    value={settings.analysisWindow}
+                                    min={1}
+                                    max={10}
+                                    unit="s"
+                                    onChange={(v) => updateSetting('analysisWindow', v)}
+                                />
+                            </Section>
+                            <Section title="Alerts">
+                                <Toggle
+                                    label="Real-time Alerts"
+                                    checked={settings.realTimeAlerts}
+                                    onChange={(v) => updateSetting('realTimeAlerts', v)}
+                                    description="Show notifications for detections"
+                                />
+                                <Toggle
+                                    label="Alert Sounds"
+                                    checked={settings.alertSounds}
+                                    onChange={(v) => updateSetting('alertSounds', v)}
+                                    description="Play sound on deepfake detection"
+                                />
+                                <Toggle
+                                    label="Auto-record Suspicious Audio"
+                                    checked={settings.autoRecordSuspicious}
+                                    onChange={(v) => updateSetting('autoRecordSuspicious', v)}
+                                    description="Automatically save suspicious audio clips"
+                                />
                             </Section>
                         </div>
                     )}
@@ -153,14 +237,28 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
                                     <label style={{ display: 'block', marginBottom: 8, fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>API Endpoint</label>
                                     <input
                                         type="text"
-                                        defaultValue="wss://api.voiceguard.ai/v1/stream"
+                                        value={settings.apiEndpoint}
+                                        onChange={(e) => updateSetting('apiEndpoint', e.target.value)}
                                         style={{ width: '100%', background: 'transparent', border: 'none', color: 'var(--text-mono)', fontFamily: 'monospace', outline: 'none' }}
                                     />
                                 </div>
+                                <Slider
+                                    label="Max Retries"
+                                    value={settings.maxRetries}
+                                    min={1}
+                                    max={10}
+                                    unit=""
+                                    onChange={(v) => updateSetting('maxRetries', v)}
+                                />
                             </Section>
 
                             <Section title="Developer Tools">
-                                <Toggle label="Debug Mode" checked={false} description="Show verbose logs in console" />
+                                <Toggle
+                                    label="Debug Mode"
+                                    checked={settings.debugMode}
+                                    onChange={(v) => updateSetting('debugMode', v)}
+                                    description="Show verbose logs in console"
+                                />
 
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
                                     <button className="btn btn-glass" style={{ justifyContent: 'flex-start', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -169,7 +267,11 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
                                     <button className="btn btn-glass" style={{ justifyContent: 'flex-start', display: 'flex', alignItems: 'center', gap: 8 }}>
                                         <RefreshCw size={14} /> Clear Application Cache
                                     </button>
-                                    <button className="btn btn-glass" style={{ justifyContent: 'flex-start', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--accent-red)', borderColor: 'rgba(255, 51, 102, 0.3)' }}>
+                                    <button
+                                        className="btn btn-glass"
+                                        style={{ justifyContent: 'flex-start', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--accent-red)', borderColor: 'rgba(255, 51, 102, 0.3)' }}
+                                        onClick={resetSettings}
+                                    >
                                         <Trash2 size={14} /> Reset All Settings
                                     </button>
                                 </div>
@@ -184,30 +286,39 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
 };
 
 /* Helper Components */
+
 const Section = ({ title, children }: { title: string, children: React.ReactNode }) => (
-    <div style={{ marginBottom: 'var(--space-2)' }}>
-        <h4 style={{
-            fontSize: 'var(--text-xs)',
-            color: 'var(--text-tertiary)',
-            textTransform: 'uppercase',
-            letterSpacing: '1.5px',
-            fontWeight: 600,
-            marginBottom: 'var(--space-3)',
-            borderBottom: '1px solid rgba(255,255,255,0.05)',
-            paddingBottom: '4px'
-        }}>{title}</h4>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>{children}</div>
+    <div className="glass-panel" style={{ padding: 'var(--space-4)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 'var(--space-3)' }}>
+            <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>{title}</div>
+            <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.1)' }} />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+            {children}
+        </div>
     </div>
 )
 
-const Select = ({ label, options, selected, icon }: { label: string, options: string[], selected?: string, icon?: React.ReactNode }) => (
+interface SelectOption {
+    value: string;
+    label: string;
+}
+
+const Select = ({ label, options, value, onChange, icon }: {
+    label: string,
+    options: SelectOption[],
+    value: string,
+    onChange: (value: string) => void,
+    icon?: React.ReactNode
+}) => (
     <div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
             {icon} {label}
         </label>
         <div className="glass-panel" style={{ position: 'relative', background: 'rgba(255,255,255,0.03)' }}>
             <select
-                defaultValue={selected}
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
                 style={{
                     width: '100%',
                     padding: '10px 12px',
@@ -218,15 +329,23 @@ const Select = ({ label, options, selected, icon }: { label: string, options: st
                     appearance: 'none',
                     cursor: 'pointer'
                 }}>
-                {options.map(o => <option key={o} style={{ background: '#0a0e27' }}>{o}</option>)}
+                {options.map(o => <option key={o.value} value={o.value} style={{ background: '#0a0e27' }}>{o.label}</option>)}
             </select>
             <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', opacity: 0.5 }}>▼</div>
         </div>
     </div>
 )
 
-const Toggle = ({ label, checked, description }: { label: string, checked: boolean, description?: string }) => (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
+const Toggle = ({ label, checked, onChange, description }: {
+    label: string,
+    checked: boolean,
+    onChange: (checked: boolean) => void,
+    description?: string
+}) => (
+    <div
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', cursor: 'pointer' }}
+        onClick={() => onChange(!checked)}
+    >
         <div>
             <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>{label}</div>
             {description && <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 2 }}>{description}</div>}
@@ -238,7 +357,6 @@ const Toggle = ({ label, checked, description }: { label: string, checked: boole
             border: checked ? '1px solid var(--accent-cyan)' : '1px solid rgba(255,255,255,0.1)',
             borderRadius: 12,
             position: 'relative',
-            cursor: 'pointer',
             transition: 'background 0.3s cubic-bezier(0.4, 0, 0.2, 1), border 0.3s ease'
         }}>
             <div style={{
@@ -249,38 +367,21 @@ const Toggle = ({ label, checked, description }: { label: string, checked: boole
                 position: 'absolute',
                 top: 2,
                 left: checked ? 22 : 2,
-                transition: 'left 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.3s ease', // Spring physics
+                transition: 'left 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.3s ease',
                 boxShadow: checked ? '0 0 10px var(--accent-cyan)' : 'none'
             }}></div>
         </div>
     </div>
 )
 
-const Checkbox = ({ label, checked, description }: { label: string, checked: boolean, description?: string }) => (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, cursor: 'pointer', padding: '4px 0' }}>
-        <div style={{
-            marginTop: 2,
-            width: 20,
-            height: 20,
-            border: checked ? '1px solid var(--accent-cyan)' : '1px solid rgba(255,255,255,0.3)',
-            borderRadius: 6,
-            background: checked ? 'rgba(0, 212, 255, 0.2)' : 'transparent',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-            transform: checked ? 'scale(1)' : 'scale(0.9)'
-        }}>
-            {checked && <div className="animate-scale-in" style={{ width: 10, height: 10, background: 'var(--accent-cyan)', borderRadius: 2 }}></div>}
-        </div>
-        <div>
-            <div style={{ fontSize: 'var(--text-sm)', color: checked ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{label}</div>
-            {description && <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 2 }}>{description}</div>}
-        </div>
-    </div>
-)
-
-const Slider = ({ label, value, min, max, unit }: { label: string, value: number, min: number, max: number, unit?: string }) => {
+const Slider = ({ label, value, min, max, unit, onChange }: {
+    label: string,
+    value: number,
+    min: number,
+    max: number,
+    unit?: string,
+    onChange: (value: number) => void
+}) => {
     const percentage = ((value - min) / (max - min)) * 100;
     return (
         <div className="group">
@@ -288,22 +389,22 @@ const Slider = ({ label, value, min, max, unit }: { label: string, value: number
                 <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>{label}</span>
                 <span className="text-mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--accent-cyan)' }}>{value}{unit}</span>
             </div>
-            <div style={{ height: 6, background: 'rgba(255,255,255,0.05)', borderRadius: 3, position: 'relative', cursor: 'pointer' }}>
-                <div style={{ width: `${percentage}%`, height: '100%', background: 'linear-gradient(90deg, var(--accent-cyan), var(--accent-green))', borderRadius: 3, transition: 'width 0.1s linear' }}></div>
-                <div style={{
-                    width: 14,
-                    height: 14,
-                    borderRadius: '50%',
-                    background: '#fff',
-                    position: 'absolute',
-                    top: -4,
-                    left: `${percentage}%`,
-                    boxShadow: '0 0 10px rgba(0,0,0,0.5)',
-                    cursor: 'grab',
-                    transform: 'translate(-50%) scale(1)',
-                    transition: 'transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), left 0.1s linear'
-                }}></div>
-            </div>
+            <input
+                type="range"
+                min={min}
+                max={max}
+                value={value}
+                onChange={(e) => onChange(parseInt(e.target.value))}
+                style={{
+                    width: '100%',
+                    height: 6,
+                    appearance: 'none',
+                    background: `linear-gradient(to right, var(--accent-cyan) 0%, var(--accent-cyan) ${percentage}%, rgba(255,255,255,0.1) ${percentage}%, rgba(255,255,255,0.1) 100%)`,
+                    borderRadius: 3,
+                    cursor: 'pointer',
+                    outline: 'none'
+                }}
+            />
         </div>
     )
 }
