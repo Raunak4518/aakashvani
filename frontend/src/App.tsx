@@ -17,6 +17,7 @@ import { ToastContainer } from './components/notifications/ToastContainer';
 import { SessionProvider } from './context/SessionContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { SettingsProvider } from './context/SettingsContext';
+import { DetectionProvider } from './context/DetectionContext';
 
 function App() {
   // Modal States
@@ -28,43 +29,45 @@ function App() {
     <SettingsProvider>
       <SessionProvider>
         <NotificationProvider>
-          <AlertProvider>
-            <MainLayout
-              header={<Header onSettingsClick={() => setIsSettingsOpen(true)} />}
-              sidebar={<LeftSidebar />}
-              main={<MainWorkspace />}
-              rightPanel={<RightPanel onShowDetails={() => setIsDetectionDetailsOpen(true)} />}
-            />
+          <DetectionProvider>
+            <AlertProvider>
+              <MainLayout
+                header={<Header onSettingsClick={() => setIsSettingsOpen(true)} />}
+                sidebar={<LeftSidebar />}
+                main={<MainWorkspace />}
+                rightPanel={<RightPanel onShowDetails={() => setIsDetectionDetailsOpen(true)} />}
+              />
 
-            {/* Global Modals & Overlays */}
-            <Suspense fallback={null}>
-              {isSettingsOpen && (
-                <SettingsModal
-                  isOpen={isSettingsOpen}
-                  onClose={() => setIsSettingsOpen(false)}
-                />
-              )}
+              {/* Global Modals & Overlays */}
+              <Suspense fallback={null}>
+                {isSettingsOpen && (
+                  <SettingsModal
+                    isOpen={isSettingsOpen}
+                    onClose={() => setIsSettingsOpen(false)}
+                  />
+                )}
 
-              {isDetectionDetailsOpen && (
-                <DetectionDetailsModal
-                  isOpen={isDetectionDetailsOpen}
-                  onClose={() => setIsDetectionDetailsOpen(false)}
-                />
-              )}
+                {isDetectionDetailsOpen && (
+                  <DetectionDetailsModal
+                    isOpen={isDetectionDetailsOpen}
+                    onClose={() => setIsDetectionDetailsOpen(false)}
+                  />
+                )}
 
-              {isSetupWizardOpen && (
-                <SetupWizard
-                  isOpen={isSetupWizardOpen}
-                  onClose={() => setIsSetupWizardOpen(false)}
-                />
-              )}
-            </Suspense>
+                {isSetupWizardOpen && (
+                  <SetupWizard
+                    isOpen={isSetupWizardOpen}
+                    onClose={() => setIsSetupWizardOpen(false)}
+                  />
+                )}
+              </Suspense>
 
-            {/* Network Warning - now uses real data from DetectionContext */}
-            <NetworkWarning />
+              {/* Network Warning - now uses real data from DetectionContext */}
+              <NetworkWarning />
 
-            <ToastContainer />
-          </AlertProvider>
+              <ToastContainer />
+            </AlertProvider>
+          </DetectionProvider>
         </NotificationProvider>
       </SessionProvider>
     </SettingsProvider>

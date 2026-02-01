@@ -65,9 +65,26 @@ async def offer(offer_data: Offer):
     await pc.setRemoteDescription(offer)
     print("STEP 3: Remote Description Set")
     
-    # Send Answer
+    # Create answer
     answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
-    print("STEP 3.5: Generated Answer, Sending back to Client")
+    
+    # Wait for ICE gathering to complete (important for connection establishment)
+    print("STEP 3.4: Waiting for ICE gathering...")
+    
+    @pc.on("icecandidate")
+    def on_icecandidate(candidate):
+        if candidate:
+            print(f"STEP ICE: Gathered candidate: {candidate.type}")
+    
+    # Wait for ICE gathering with timeout
+    start_time = asyncio.get_event_loop().time()
+    while pc.iceGatheringState != "complete":
+        if asyncio.get_event_loop().time() - start_time > 5:  # 5 second timeout
+            print("STEP 3.4b: ICE gathering timeout, proceeding anyway")
+            break
+        await asyncio.sleep(0.1)
+    
+    print(f"STEP 3.5: ICE Gathering State: {pc.iceGatheringState}, Sending Answer to Client")
     
     return {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
