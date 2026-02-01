@@ -67,6 +67,7 @@ interface AudioDevice {
     deviceId: string;
     label: string;
     kind: 'audioinput' | 'audiooutput';
+    type?: 'microphone' | 'system' | 'virtual'; // Source type for UI grouping
 }
 
 interface SettingsContextType {
@@ -100,26 +101,105 @@ export const SettingsProvider = ({ children }: { children: ReactNode }) => {
 
     const hasUnsavedChanges = JSON.stringify(settings) !== JSON.stringify(savedSettings);
 
+    // Helper to detect device type from label
+    const getDeviceType = (label: string): 'microphone' | 'system' | 'virtual' => {
+        const lowerLabel = label.toLowerCase();
+        // Detect loopback/system audio devices
+        if (lowerLabel.includes('stereo mix') || 
+            lowerLabel.includes('what u hear') ||
+            lowerLabel.includes('loopback') ||
+            lowerLabel.includes('wave out') ||
+            lowerLabel.includes('system audio') ||
+            lowerLabel.includes('virtual cable') ||
+            lowerLabel.includes('vb-audio') ||
+            lowerLabel.includes('voicemeeter') ||
+            lowerLabel.includes('blackhole') ||
+            lowerLabel.includes('soundflower')) {
+            return 'system';
+        }
+        // Detect virtual audio devices
+        if (lowerLabel.includes('virtual') || 
+            lowerLabel.includes('cable')) {
+            return 'virtual';
+        }
+        return 'microphone';
+    };
+
     // Load audio devices on mount
     const refreshAudioDevices = useCallback(async () => {
         try {
             // Request permission first to get device labels
             await navigator.mediaDevices.getUserMedia({ audio: true });
             const devices = await navigator.mediaDevices.enumerateDevices();
-            const audioDevs = devices
-                .filter(d => d.kind === 'audioinput' || d.kind === 'audiooutput')
-                .map(d => ({
-                    deviceId: d.deviceId,
-                    label: d.label || (d.kind === 'audioinput' ? 'Microphone' : 'Speaker'),
-                    kind: d.kind as 'audioinput' | 'audiooutput'
-                }));
+            
+            const audioDevs: AudioDevice[] = [];
+            
+            // Add Tab/Screen audio option (for screen/window capture with audio)
+            audioDevs.push({
+                deviceId: 'screen-share-audio',
+                label: '🖥️ Tab/Screen Audio (via Screen Share)',
+                kind: 'audioinput',
+                type: 'system'
+            });
+            
+            // Separate loopback devices, virtual devices, and regular mics
+            const inputDevices = devices.filter(d => d.kind === 'audioinput');
+            
+            // First add any loopback/system devices (like Stereo Mix)
+            inputDevices
+                .filter(d => getDeviceType(d.label) === 'system')
+                .forEach(d => {
+                    audioDevs.push({
+                        deviceId: d.deviceId,
+                        label: `🔊 ${d.label}`,
+                        kind: 'audioinput',
+                        type: 'system'
+                    });
+                });
+            
+            // Then add virtual audio devices
+            inputDevices
+                .filter(d => getDeviceType(d.label) === 'virtual')
+                .forEach(d => {
+                    audioDevs.push({
+                        deviceId: d.deviceId,
+                        label: `🔌 ${d.label}`,
+                        kind: 'audioinput',
+                        type: 'virtual'
+                    });
+                });
+            
+            // Then add regular microphones
+            inputDevices
+                .filter(d => getDeviceType(d.label) === 'microphone')
+                .forEach(d => {
+                    audioDevs.push({
+                        deviceId: d.deviceId,
+                        label: d.label || 'Microphone',
+                        kind: 'audioinput',
+                        type: 'microphone'
+                    });
+                });
+            
+            // Add output devices
+            devices
+                .filter(d => d.kind === 'audiooutput')
+                .forEach(d => {
+                    audioDevs.push({
+                        deviceId: d.deviceId,
+                        label: d.label || 'Speaker',
+                        kind: 'audiooutput'
+                    });
+                });
+                
             setAudioDevices(audioDevs);
         } catch (e) {
             console.error('Failed to get audio devices:', e);
-            // Add default device if failed
+            // Add default devices if failed
             setAudioDevices([
-                { deviceId: 'default', label: 'System Default', kind: 'audioinput' },
-                { deviceId: 'default', label: 'System Default', kind: 'audiooutput' }
+                { deviceId: 'screen-share-audio', label: '🖥️ Tab/Screen Audio (via Screen Share)', kind: 'audioinput', type: 'system' },
+                { deviceId: 'default', label: 'Default Microphone', kind: 'audioinput', type: 'microphone' },
+                { deviceId: 'default', label: 'Default Speaker', kind: 'audiooutput' }
             ]);
         }
     }, []);

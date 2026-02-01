@@ -47,12 +47,20 @@ class AudioConsumer:
     async def _consume(self):
         logger.info(f"Started WebRTC Audio Consumer [{self.id}]")
         frame_count = 0
+        last_log_time = time.time()
         
         try:
             while self.running:
                 try:
                     frame = await self.track.recv()
                     frame_count += 1
+                    
+                    # Log every 5 seconds to show frames are still coming
+                    current_time = time.time()
+                    if current_time - last_log_time >= 5:
+                        logger.info(f"[{self.id}] Received {frame_count} frames so far")
+                        last_log_time = current_time
+                        
                 except Exception as e:
                     print(f"STEP ERROR [{self.id}]: Track ended/error: {e}")
                     break

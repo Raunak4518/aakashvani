@@ -1,8 +1,8 @@
-// background.js - Service worker that manages WebRTC connections
+// background.js - Service worker that manages WebRTC connections for deepfake detection
 
 let peerConnection = null;
+let dataChannel = null;
 let audioStream = null;
-let signalingWebSocket = null;
 let isStreaming = false;
 let statusMessage = 'Disconnected';
 let backendUrl = '';
@@ -42,8 +42,8 @@ async function startStreaming(url, audioSource) {
       await captureMicrophoneAudio();
     }
     
-    // Connect to signaling server
-    await connectSignalingServer(url);
+    // Setup WebRTC and connect via HTTP offer/answer
+    await setupPeerConnectionAndConnect(url);
     
     isStreaming = true;
     statusMessage = 'Connected';
@@ -86,7 +86,8 @@ async function captureMicrophoneAudio() {
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
-        autoGainControl: true
+        autoGainControl: true,
+        sampleRate: 16000 // Match backend expected sample rate
       },
       video: false
     });
@@ -95,60 +96,47 @@ async function captureMicrophoneAudio() {
   }
 }
 
-// Connect to WebSocket signaling server
-function connectSignalingServer(url) {
-  return new Promise((resolve, reject) => {
-    signalingWebSocket = new WebSocket(url);
-    
-    signalingWebSocket.onopen = async () => {
-      console.log('Signaling server connected');
-      
-      // Create peer connection and setup
-      await setupPeerConnection();
-      
-      resolve();
-    };
-    
-    signalingWebSocket.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      reject(new Error('Failed to connect to signaling server'));
-    };
-    
-    signalingWebSocket.onclose = () => {
-      console.log('Signaling server disconnected');
-      if (isStreaming) {
-        stopStreaming();
-        showNotification('Connection Lost', 'Signaling server disconnected', 'error');
-      }
-    };
-    
-    signalingWebSocket.onmessage = async (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        await handleSignalingMessage(message);
-      } catch (error) {
-        console.error('Error handling signaling message:', error);
-      }
-    };
-  });
-}
-
-// Setup WebRTC peer connection
-async function setupPeerConnection() {
+// Setup WebRTC and connect via HTTP offer/answer exchange
+async function setupPeerConnectionAndConnect(url) {
   peerConnection = new RTCPeerConnection(rtcConfig);
+  
+  // Create data channel for receiving detection results from backend
+  dataChannel = peerConnection.createDataChannel('detection', {
+    ordered: true
+  });
+  
+  dataChannel.onopen = () => {
+    console.log('Data channel opened - ready to receive detection results');
+    updateStatus('connected', 'Data channel ready');
+  };
+  
+  dataChannel.onclose = () => {
+    console.log('Data channel closed');
+  };
+  
+  dataChannel.onerror = (error) => {
+    console.error('Data channel error:', error);
+  };
+  
+  dataChannel.onmessage = (event) => {
+    try {
+      const message = JSON.parse(event.data);
+      handleDetectionResult(message);
+    } catch (error) {
+      console.error('Error parsing detection result:', error);
+    }
+  };
   
   // Add audio tracks to peer connection
   audioStream.getTracks().forEach(track => {
+    console.log('Adding audio track:', track.label);
     peerConnection.addTrack(track, audioStream);
   });
   
-  // Handle ICE candidates
+  // Handle ICE candidates (for debugging)
   peerConnection.onicecandidate = (event) => {
     if (event.candidate) {
-      sendSignalingMessage({
-        type: 'ice-candidate',
-        candidate: event.candidate
-      });
+      console.log('ICE candidate gathered:', event.candidate.type);
     }
   };
   
@@ -156,20 +144,24 @@ async function setupPeerConnection() {
   peerConnection.onconnectionstatechange = () => {
     console.log('Connection state:', peerConnection.connectionState);
     
-    if (peerConnection.connectionState === 'connected') {
-      updateStatus('connected', 'WebRTC connected');
-      showNotification('Connected', 'WebRTC connection established');
-    } else if (peerConnection.connectionState === 'failed') {
-      updateStatus('disconnected', 'Connection failed');
-      showNotification('Connection Failed', 'WebRTC connection failed', 'error');
-      stopStreaming();
-    } else if (peerConnection.connectionState === 'disconnected') {
-      updateStatus('disconnected', 'Disconnected');
-      stopStreaming();
+    switch (peerConnection.connectionState) {
+      case 'connected':
+        updateStatus('connected', 'WebRTC connected - Analyzing audio...');
+        showNotification('Connected', 'Deepfake detection is now active');
+        break;
+      case 'failed':
+        updateStatus('disconnected', 'Connection failed');
+        showNotification('Connection Failed', 'WebRTC connection failed', 'error');
+        stopStreaming();
+        break;
+      case 'disconnected':
+        updateStatus('disconnected', 'Disconnected');
+        stopStreaming();
+        break;
     }
   };
   
-  // Create and send offer
+  // Create offer
   const offer = await peerConnection.createOffer({
     offerToReceiveAudio: false,
     offerToReceiveVideo: false
@@ -177,53 +169,100 @@ async function setupPeerConnection() {
   
   await peerConnection.setLocalDescription(offer);
   
-  sendSignalingMessage({
-    type: 'offer',
-    sdp: offer
+  // Wait for ICE gathering to complete (important for NAT traversal)
+  await waitForIceGathering();
+  
+  console.log('Sending offer to backend:', url);
+  
+  // Send offer to backend via HTTP POST
+  const response = await fetch(`${url}/api/v1/webrtc/offer`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      sdp: peerConnection.localDescription.sdp,
+      type: peerConnection.localDescription.type
+    })
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Backend error (${response.status}): ${errorText}`);
+  }
+  
+  const answer = await response.json();
+  console.log('Received answer from backend');
+  
+  // Set remote description (the answer from backend)
+  await peerConnection.setRemoteDescription(new RTCSessionDescription({
+    sdp: answer.sdp,
+    type: answer.type
+  }));
+  
+  console.log('WebRTC connection established with backend');
+}
+
+// Wait for ICE gathering to complete
+function waitForIceGathering() {
+  return new Promise((resolve) => {
+    if (peerConnection.iceGatheringState === 'complete') {
+      resolve();
+      return;
+    }
+    
+    const checkState = () => {
+      if (peerConnection.iceGatheringState === 'complete') {
+        peerConnection.removeEventListener('icegatheringstatechange', checkState);
+        resolve();
+      }
+    };
+    
+    peerConnection.addEventListener('icegatheringstatechange', checkState);
+    
+    // Timeout after 5 seconds
+    setTimeout(() => {
+      peerConnection.removeEventListener('icegatheringstatechange', checkState);
+      console.log('ICE gathering timeout, proceeding anyway');
+      resolve();
+    }, 5000);
   });
 }
 
-// Handle signaling messages from server
-async function handleSignalingMessage(message) {
-  if (!peerConnection) return;
+// Handle detection results from backend
+function handleDetectionResult(message) {
+  console.log('Detection result received:', message);
   
-  switch (message.type) {
-    case 'answer':
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(message.sdp));
-      break;
-      
-    case 'ice-candidate':
-      if (message.candidate) {
-        await peerConnection.addIceCandidate(new RTCIceCandidate(message.candidate));
-      }
-      break;
-      
-    case 'notification':
-      // Handle custom notifications from backend
+  if (message.type === 'detection_result') {
+    const data = message.data;
+    
+    // Show notification for deepfake detection
+    if (data.status === 'deepfake') {
       showNotification(
-        message.title || 'Notification',
-        message.body || '',
-        message.notificationType || 'info'
+        '⚠️ Deepfake Detected!',
+        `Confidence: ${(data.confidence * 100).toFixed(1)}%`,
+        'error'
       );
-      break;
-      
-    case 'command':
-      // Handle commands from backend
-      if (message.command === 'stop') {
-        stopStreaming();
-        showNotification('Stopped by Server', 'Streaming stopped by backend');
-      }
-      break;
-      
-    default:
-      console.log('Unknown message type:', message.type);
-  }
-}
-
-// Send message through signaling server
-function sendSignalingMessage(message) {
-  if (signalingWebSocket && signalingWebSocket.readyState === WebSocket.OPEN) {
-    signalingWebSocket.send(JSON.stringify(message));
+    }
+    
+    // Send to popup if open
+    chrome.runtime.sendMessage({
+      type: 'DETECTION_RESULT',
+      data: data
+    }).catch(() => {}); // Ignore if popup is closed
+    
+  } else if (message.type === 'alert') {
+    showNotification(
+      '🚨 Alert',
+      message.data?.message || 'Suspicious audio detected',
+      'error'
+    );
+    
+    // Send alert to popup
+    chrome.runtime.sendMessage({
+      type: 'ALERT',
+      data: message.data
+    }).catch(() => {});
   }
 }
 
@@ -231,6 +270,12 @@ function sendSignalingMessage(message) {
 function stopStreaming() {
   isStreaming = false;
   statusMessage = 'Disconnected';
+  
+  // Close data channel
+  if (dataChannel) {
+    dataChannel.close();
+    dataChannel = null;
+  }
   
   // Close peer connection
   if (peerConnection) {
@@ -242,12 +287,6 @@ function stopStreaming() {
   if (audioStream) {
     audioStream.getTracks().forEach(track => track.stop());
     audioStream = null;
-  }
-  
-  // Close WebSocket
-  if (signalingWebSocket) {
-    signalingWebSocket.close();
-    signalingWebSocket = null;
   }
   
   updateStatus('disconnected', 'Stopped');
@@ -272,18 +311,12 @@ function updateStatus(status, message) {
 
 // Show Chrome notification
 function showNotification(title, message, type = 'info') {
-  const iconMap = {
-    info: 'icons/icon48.png',
-    error: 'icons/icon48.png',
-    success: 'icons/icon48.png'
-  };
-  
   chrome.notifications.create({
     type: 'basic',
-    iconUrl: iconMap[type],
+    iconUrl: 'icons/icon48.png',
     title: title,
     message: message,
-    priority: 2
+    priority: type === 'error' ? 2 : 1
   });
 }
 

@@ -102,14 +102,51 @@
       background-color: #f8f9fa;
       border-radius: 4px;
     }
+    
+    .detection-panel {
+      margin-top: 15px;
+      padding: 10px;
+      border-radius: 4px;
+      background-color: #f8f9fa;
+      border: 1px solid #e9ecef;
+    }
+    
+    .detection-panel h3 {
+      margin: 0 0 10px 0;
+      font-size: 14px;
+      color: #333;
+    }
+    
+    .detection-result {
+      padding: 8px;
+      margin: 5px 0;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    
+    .detection-result.authentic {
+      background-color: #d4edda;
+      color: #155724;
+    }
+    
+    .detection-result.deepfake {
+      background-color: #f8d7da;
+      color: #721c24;
+    }
+    
+    .no-results {
+      color: #6c757d;
+      font-style: italic;
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
-  <h2>🎤 Audio Stream Control</h2>
+  <h2>🎤 Deepfake Audio Detector</h2>
   
   <div class="section">
-    <label for="backendUrl">Backend WebRTC Server URL:</label>
-    <input type="text" id="backendUrl" placeholder="wss://your-server.com/signaling" />
+    <label for="backendUrl">Backend Server URL:</label>
+    <input type="text" id="backendUrl" placeholder="http://localhost:8000" value="http://localhost:8000" />
   </div>
   
   <div class="section">
@@ -120,15 +157,22 @@
     </select>
   </div>
   
-  <button id="startBtn">Start Streaming</button>
-  <button id="stopBtn" class="stop-btn" style="display: none;">Stop Streaming</button>
+  <button id="startBtn">Start Detection</button>
+  <button id="stopBtn" class="stop-btn" style="display: none;">Stop Detection</button>
   
   <div id="status" class="status disconnected">
     Disconnected
   </div>
   
+  <div class="detection-panel" id="detectionPanel" style="display: none;">
+    <h3>🔍 Detection Results</h3>
+    <div id="detectionResults">
+      <p class="no-results">No detections yet...</p>
+    </div>
+  </div>
+  
   <div class="info">
-    💡 This extension captures audio and streams it to your backend server via WebRTC. Make sure your backend server is running and accessible.
+    💡 This extension streams audio to your backend for real-time deepfake detection. Detection results will appear when audio is analyzed.
   </div>
   
   <script src="popup.js"></script>

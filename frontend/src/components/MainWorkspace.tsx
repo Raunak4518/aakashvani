@@ -79,21 +79,13 @@ export const MainWorkspace = () => {
         } else {
             try {
                 await startSession(); // Sets status to 'connecting'
-
-                // Add timeout for connection attempt (10 seconds)
-                const connectionTimeout = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('Connection timeout')), 10000)
-                );
-
-                await Promise.race([
-                    startRecording(),
-                    connectionTimeout
-                ]);
+                
+                // Don't use timeout - let startRecording handle its own timeouts
+                // The user may take time to select a tab in the picker dialog
+                await startRecording(settings.inputDevice);
             } catch (error) {
                 console.error('Connection failed:', error);
-                const errorMsg = error instanceof Error && error.message === 'Connection timeout'
-                    ? 'Something went wrong - connection timed out'
-                    : 'Something went wrong';
+                const errorMsg = error instanceof Error ? error.message : 'Something went wrong';
                 setSessionError(errorMsg);
                 stopRecording();
             }
@@ -191,13 +183,16 @@ export const MainWorkspace = () => {
                 gridTemplateColumns: '1fr auto 1fr',
                 alignItems: 'center',
                 gap: 'var(--space-4)',
-                background: 'linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)'
+                background: 'linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)',
+                overflow: 'visible',
+                position: 'relative',
+                zIndex: 50
             }}>
 
                 {/* Left: Input Source + Level Meter */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', position: 'relative', zIndex: 100 }}>
                     {/* Input Device Selector */}
-                    <div style={{ position: 'relative' }}>
+                    <div style={{ position: 'relative', zIndex: 100 }}>
                         <div
                             className="glass-panel"
                             onClick={() => setShowDeviceDropdown(!showDeviceDropdown)}
@@ -232,58 +227,177 @@ export const MainWorkspace = () => {
 
                         {/* Device Dropdown */}
                         {showDeviceDropdown && (
-                            <div
-                                className="glass-panel"
-                                style={{
-                                    position: 'absolute',
-                                    top: '100%',
-                                    left: 0,
-                                    marginTop: 8,
-                                    minWidth: 250,
-                                    zIndex: 100,
-                                    padding: 'var(--space-2)',
-                                    borderRadius: 12,
-                                    background: 'rgba(10, 14, 39, 0.95)',
-                                    border: '1px solid rgba(255,255,255,0.1)',
-                                    boxShadow: '0 10px 40px rgba(0,0,0,0.5)'
-                                }}
-                            >
+                            <>
+                                {/* Backdrop to close dropdown when clicking outside */}
+                                <div 
+                                    onClick={() => setShowDeviceDropdown(false)}
+                                    style={{
+                                        position: 'fixed',
+                                        top: 0,
+                                        left: 0,
+                                        right: 0,
+                                        bottom: 0,
+                                        zIndex: 99998
+                                    }}
+                                />
+                                <div
+                                    className="glass-panel"
+                                    style={{
+                                        position: 'absolute',
+                                        top: '100%',
+                                        left: 0,
+                                        marginTop: 8,
+                                        minWidth: 280,
+                                        zIndex: 99999,
+                                        padding: 'var(--space-2)',
+                                        borderRadius: 12,
+                                        background: 'rgba(10, 14, 39, 0.98)',
+                                        border: '1px solid rgba(255,255,255,0.15)',
+                                        boxShadow: '0 10px 40px rgba(0,0,0,0.7), 0 0 0 1px rgba(0,212,255,0.1)',
+                                        backdropFilter: 'blur(20px)'
+                                    }}
+                                >
                                 {inputDevices.length === 0 ? (
                                     <div style={{ padding: 12, color: 'var(--text-tertiary)', fontSize: 'var(--text-sm)' }}>
-                                        No microphones found
+                                        No audio sources found
                                     </div>
                                 ) : (
-                                    inputDevices.map(device => (
-                                        <div
-                                            key={device.deviceId}
-                                            onClick={() => {
-                                                updateSetting('inputDevice', device.deviceId);
-                                                setShowDeviceDropdown(false);
-                                            }}
-                                            style={{
-                                                padding: '10px 12px',
-                                                borderRadius: 8,
-                                                cursor: 'pointer',
-                                                background: device.deviceId === settings.inputDevice ? 'rgba(0, 212, 255, 0.1)' : 'transparent',
-                                                color: device.deviceId === settings.inputDevice ? 'var(--accent-cyan)' : 'var(--text-primary)',
-                                                fontSize: 'var(--text-sm)',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: 8,
-                                                transition: 'background 0.2s'
-                                            }}
-                                        >
-                                            <Mic size={14} />
-                                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                {device.label}
-                                            </span>
-                                            {device.deviceId === settings.inputDevice && (
-                                                <span style={{ marginLeft: 'auto', color: 'var(--accent-green)' }}>✓</span>
-                                            )}
+                                    <>
+                                        {/* System/Loopback Audio Section */}
+                                        {inputDevices.some(d => (d as any).type === 'system') && (
+                                            <>
+                                                <div style={{ padding: '6px 8px', fontSize: 'var(--text-xs)', color: 'var(--accent-cyan)', fontWeight: 600, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                    <Volume2 size={12} /> SYSTEM / TAB AUDIO
+                                                </div>
+                                                <div style={{ padding: '0 8px 6px', fontSize: '10px', color: 'var(--text-tertiary)' }}>
+                                                    Capture audio from apps, browser tabs, or Stereo Mix
+                                                </div>
+                                            </>
+                                        )}
+                                        {inputDevices.filter(d => (d as any).type === 'system').map(device => (
+                                            <div
+                                                key={device.deviceId}
+                                                onClick={() => {
+                                                    updateSetting('inputDevice', device.deviceId);
+                                                    setShowDeviceDropdown(false);
+                                                }}
+                                                style={{
+                                                    padding: '10px 12px',
+                                                    borderRadius: 8,
+                                                    cursor: 'pointer',
+                                                    background: device.deviceId === settings.inputDevice ? 'rgba(0, 212, 255, 0.1)' : 'transparent',
+                                                    color: device.deviceId === settings.inputDevice ? 'var(--accent-cyan)' : 'var(--text-primary)',
+                                                    fontSize: 'var(--text-sm)',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: 8,
+                                                    transition: 'background 0.2s'
+                                                }}
+                                                onMouseEnter={(e) => e.currentTarget.style.background = device.deviceId === settings.inputDevice ? 'rgba(0, 212, 255, 0.15)' : 'rgba(255,255,255,0.05)'}
+                                                onMouseLeave={(e) => e.currentTarget.style.background = device.deviceId === settings.inputDevice ? 'rgba(0, 212, 255, 0.1)' : 'transparent'}
+                                            >
+                                                <Volume2 size={14} />
+                                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                                                    {device.label}
+                                                </span>
+                                                {device.deviceId === settings.inputDevice && (
+                                                    <span style={{ color: 'var(--accent-green)' }}>✓</span>
+                                                )}
+                                            </div>
+                                        ))}
+                                        
+                                        {/* Virtual Audio Devices Section */}
+                                        {inputDevices.some(d => (d as any).type === 'virtual') && (
+                                            <>
+                                                <div style={{ padding: '6px 8px', fontSize: 'var(--text-xs)', color: 'var(--accent-orange)', fontWeight: 600, marginTop: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                    🔌 VIRTUAL AUDIO DEVICES
+                                                </div>
+                                            </>
+                                        )}
+                                        {inputDevices.filter(d => (d as any).type === 'virtual').map(device => (
+                                            <div
+                                                key={device.deviceId}
+                                                onClick={() => {
+                                                    updateSetting('inputDevice', device.deviceId);
+                                                    setShowDeviceDropdown(false);
+                                                }}
+                                                style={{
+                                                    padding: '10px 12px',
+                                                    borderRadius: 8,
+                                                    cursor: 'pointer',
+                                                    background: device.deviceId === settings.inputDevice ? 'rgba(255, 165, 0, 0.1)' : 'transparent',
+                                                    color: device.deviceId === settings.inputDevice ? 'var(--accent-orange)' : 'var(--text-primary)',
+                                                    fontSize: 'var(--text-sm)',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: 8,
+                                                    transition: 'background 0.2s'
+                                                }}
+                                                onMouseEnter={(e) => e.currentTarget.style.background = device.deviceId === settings.inputDevice ? 'rgba(255, 165, 0, 0.15)' : 'rgba(255,255,255,0.05)'}
+                                                onMouseLeave={(e) => e.currentTarget.style.background = device.deviceId === settings.inputDevice ? 'rgba(255, 165, 0, 0.1)' : 'transparent'}
+                                            >
+                                                <Activity size={14} />
+                                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                                                    {device.label}
+                                                </span>
+                                                {device.deviceId === settings.inputDevice && (
+                                                    <span style={{ color: 'var(--accent-green)' }}>✓</span>
+                                                )}
+                                            </div>
+                                        ))}
+                                        
+                                        {/* Microphones Section */}
+                                        {inputDevices.some(d => (d as any).type === 'microphone') && (
+                                            <div style={{ padding: '6px 8px', fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', fontWeight: 600, marginTop: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                <Mic size={12} /> MICROPHONES
+                                            </div>
+                                        )}
+                                        {inputDevices.filter(d => (d as any).type === 'microphone').map(device => (
+                                            <div
+                                                key={device.deviceId}
+                                                onClick={() => {
+                                                    updateSetting('inputDevice', device.deviceId);
+                                                    setShowDeviceDropdown(false);
+                                                }}
+                                                style={{
+                                                    padding: '10px 12px',
+                                                    borderRadius: 8,
+                                                    cursor: 'pointer',
+                                                    background: device.deviceId === settings.inputDevice ? 'rgba(0, 212, 255, 0.1)' : 'transparent',
+                                                    color: device.deviceId === settings.inputDevice ? 'var(--accent-cyan)' : 'var(--text-primary)',
+                                                    fontSize: 'var(--text-sm)',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: 8,
+                                                    transition: 'background 0.2s'
+                                                }}
+                                                onMouseEnter={(e) => e.currentTarget.style.background = device.deviceId === settings.inputDevice ? 'rgba(0, 212, 255, 0.15)' : 'rgba(255,255,255,0.05)'}
+                                                onMouseLeave={(e) => e.currentTarget.style.background = device.deviceId === settings.inputDevice ? 'rgba(0, 212, 255, 0.1)' : 'transparent'}
+                                            >
+                                                <Mic size={14} />
+                                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                                                    {device.label}
+                                                </span>
+                                                {device.deviceId === settings.inputDevice && (
+                                                    <span style={{ color: 'var(--accent-green)' }}>✓</span>
+                                                )}
+                                            </div>
+                                        ))}
+                                        
+                                        {/* Help text */}
+                                        <div style={{ 
+                                            padding: '8px 10px', 
+                                            marginTop: 8, 
+                                            fontSize: '10px', 
+                                            color: 'var(--text-tertiary)',
+                                            borderTop: '1px solid rgba(255,255,255,0.1)'
+                                        }}>
+                                            💡 For system audio without screen share, enable "Stereo Mix" in Windows Sound settings
                                         </div>
-                                    ))
+                                    </>
                                 )}
                             </div>
+                            </>
                         )}
                     </div>
 
@@ -516,7 +630,7 @@ export const MainWorkspace = () => {
                     </div>
 
                     {/* Segmented Bar */}
-                    <div style={{ display: 'flex', gap: 4, height: 12 }}>
+                    <div style={{ display: 'flex', gap: 4, height: 12, zIndex:-999}}>
                         {Array.from({ length: 10 }).map((_, i) => (
                             <div key={i} style={{
                                 flex: 1,
