@@ -46,7 +46,13 @@ class AudioStreamManager:
                 buffer_size=config.buffer_size,
                 frame_size=config.frame_size
             )
-            self.preprocessor = StreamingPreprocessor(target_sample_rate=config.sample_rate)
+            
+            # Initialize robust preprocessor with config settings
+            self.preprocessor = StreamingPreprocessor(
+                target_sample_rate=config.sample_rate,
+                mode=config.preprocessing_mode,
+                aggressiveness=config.noise_reduction_aggressiveness
+            )
             
             # Inference pipeline
             self.model_manager = ModelManager() # Loads best_model.pt
@@ -61,6 +67,8 @@ class AudioStreamManager:
             # State management
             self.state = StreamState.IDLE
             self.metrics = MetricsCollector()
+            
+            logger.info(f"AudioStreamManager initialized with preprocessing mode: {config.preprocessing_mode}")
             
         except Exception as e:
             self.error_handler.handle(e, context={"phase": "init"})

@@ -61,7 +61,7 @@ export const Header = ({ onSettingsClick }: HeaderProps) => {
                         WebkitBackgroundClip: 'text',
                         WebkitTextFillColor: 'transparent'
                     }}>
-                        VoiceGuard AI
+                       Aakashvani
                     </span>
                     <span style={{ fontSize: '10px', color: 'var(--text-tertiary)', letterSpacing: 1 }}>REAL-TIME PROTECTION</span>
                 </div>

@@ -41,6 +41,14 @@ class StreamingConfig:
     drop_on_queue_full: bool = True
     enable_metrics: bool = True
     
+    # Robust Audio Processing parameters
+    preprocessing_mode: str = "voip"  # "voip", "clean", or "aggressive"
+    noise_reduction_aggressiveness: float = 0.3  # 0.0 to 1.0
+    enable_packet_loss_concealment: bool = True
+    enable_codec_artifact_reduction: bool = True
+    enable_adaptive_gain: bool = True
+    quality_check_interval: int = 10  # Check quality every N frames
+    
     # Logging
     log_level: str = "INFO"
     log_file: Optional[str] = "streaming_antispoofing.log"
